@@ -629,8 +629,10 @@ describe("Matter service area selection", () => {
     });
 
     expect(result.status).toBe(3); // INVALID_SET
+    // 3.38.0 made the refusal specific: how many maps, which ones, which
+    // areas, and that the controller keeps its previous selection (#24).
     expect(platform.log.warn).toHaveBeenCalledWith(
-      expect.stringContaining("multiple Roborock maps")
+      expect.stringContaining("spanning 2 Roborock maps")
     );
   });
 

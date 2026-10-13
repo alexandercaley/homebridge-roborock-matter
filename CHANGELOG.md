@@ -1,5 +1,44 @@
 # Changelog
 
+## 3.38.0
+
+**Two log lines that could not tell two causes apart, and one of them was accusing this plugin of a bug that was not there.**
+
+Nothing about how the plugin talks to a robot changes in this release. What changes is what it says when something fails, in the two places where the sentence it printed was the reason a diagnosis stalled.
+
+### "Please report this — it is a bug here" was wrong (#28)
+
+[@CooperCGN](https://github.com/mathiashornbek/homebridge-roborock-matter/issues/28)'s log says, about his S8 Pro Ultra:
+
+> NOTE: 30 map reply frame(s) for this robot were received and then discarded by the plugin (addressed-elsewhere: 30), so the robot IS answering and this side is throwing it away. Please report this — it is a bug here, not on your robot.
+
+It is not a bug here. `addressed-elsewhere` means the protocol-301 frame carried a different controller's endpoint, and the endpoint identifies a **controller on the account**, not this plugin: the Roborock app open on a phone, a second Homebridge, a voice assistant skill each have their own, and all of them share the robot's MQTT topic. Their replies reach this handler and are discarded, which is correct — they were never ours. His 30 frames arrived while a scheduled clean was being watched in the app.
+
+One case genuinely is ours: our own endpoint being wrong. It is told apart by a measurement the counter was missing — the frames that **were** addressed to us. If the key were wrong, nothing would ever be, so one accepted frame acquits it and convicts the other controller instead.
+
+The give-up line now distinguishes three outcomes instead of asserting one:
+
+- Frames addressed to this plugin and still discarded → unchanged; that is a bug here and still says so.
+- Frames for another controller, with frames of ours accepted → named as another controller's, with the Roborock app given as the usual cause, and no bug report asked for.
+- Frames for another controller with **nothing** ever accepted → that is the real bug's shape, and the line now points at the account key rather than at the robot.
+
+`accepted` rides along in the diagnostic report's `discardedReplyFrames`, so the next report settles it without a round trip.
+
+### A refused room selection now says what it refused (#24)
+
+[@Marrand](https://github.com/mathiashornbek/homebridge-roborock-matter/issues/24) can add rooms one at a time and the selection holds; selecting all 8 reverts it to the 2 rooms from an earlier clean, repeatably. The only log line covering it read:
+
+> Matter service area selection request for S8: none.
+
+Three different causes print that: the controller really did send an empty list, the controller sent 8 ids and none of them could be read, or the set spanned 2 Roborock maps and was refused — and a refusal **is** a revert, because a controller that gets `InvalidSet` keeps the selection it last had accepted. At one run a week, that is a week per guess.
+
+- The request line now names what arrived as well as what was understood: no list, an empty list, or _n_ entries of which _m_ could not be read as an area id.
+- The multi-map refusal names the maps and the areas, and says in words that the selection is refused rather than cleared, so the controller will keep showing the previous one.
+
+### Tests
+
+2,201 tests, 14 more than 3.37.0, including the endpoint guard driven through the real protocol-301 handler for both an accepted frame and another controller's.
+
 ## 3.37.0
 
 **When a cloud request times out, the diagnostics report can now say whether the MQTT session was actually carrying anything at the time.**

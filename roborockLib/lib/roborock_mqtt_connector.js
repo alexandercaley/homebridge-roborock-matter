@@ -98,26 +98,58 @@ function isRpcReplyFrame(data) {
   }
 }
 
-function noteDroppedFrame(duid, reason) {
+function frameCountersFor(duid) {
   let entry = droppedFrames.get(duid);
   if (!entry) {
-    entry = { total: 0, byReason: {} };
+    entry = { total: 0, accepted: 0, byReason: {} };
     droppedFrames.set(duid, entry);
   }
+  return entry;
+}
+
+function noteDroppedFrame(duid, reason) {
+  const entry = frameCountersFor(duid);
   entry.total += 1;
   entry.byReason[reason] = (entry.byReason[reason] || 0) + 1;
   return entry;
 }
 
 /**
- * Protocol-301 frames discarded for one robot, for the give-up message and
- * the diagnostic report.
+ * The other half of the measurement: a protocol-301 frame that WAS addressed
+ * to this plugin.
+ *
+ * Without it, `addressed-elsewhere` cannot be read. The endpoint on the wire
+ * names a controller, and the endpoint is account-wide — the Roborock app, a
+ * second Homebridge, a voice skill all share the robot's MQTT topic and each
+ * carries its own. Their frames reach this handler and are dropped, correctly.
+ * Counting only the drops made that indistinguishable from the one case that
+ * IS our fault, a wrong endpoint of our own, and the give-up line duly told
+ * #28 to report a bug against correct behaviour. One accepted frame proves our
+ * key is right; zero accepted alongside drops is the real bug's shape.
  *
  * @param {string} duid
- * @returns {{total: number, byReason: Record<string, number>}}
+ * @returns {{total: number, accepted: number, byReason: Record<string, number>}}
+ */
+function noteAcceptedFrame(duid) {
+  const entry = frameCountersFor(duid);
+  entry.accepted += 1;
+  return entry;
+}
+
+/**
+ * Protocol-301 frames discarded for one robot, and how many were ours, for the
+ * give-up message and the diagnostic report.
+ *
+ * @param {string} duid
+ * @returns {{total: number, accepted: number, byReason: Record<string, number>}}
  */
 function describeDroppedFrames(duid) {
-  return droppedFrames.get(duid) || { total: 0, byReason: {} };
+  return droppedFrames.get(duid) || { total: 0, accepted: 0, byReason: {} };
+}
+
+/** Test seam: the counters are process-lifetime and module-level by design. */
+function resetFrameCounters() {
+  droppedFrames.clear();
 }
 
 function photoBufferFor(duid) {
@@ -682,6 +714,12 @@ class roborock_mqtt_connector {
                 return;
               }
 
+              // Past the guard: this frame names US. Counted before the
+              // decipher, because the question it answers is only about the
+              // endpoint — a frame addressed to us that then fails to decode
+              // is still proof that our account key is the right one.
+              noteAcceptedFrame(duid);
+
               const iv = Buffer.alloc(16, 0);
               const decipher = crypto.createDecipheriv(
                 "aes-128-cbc",
@@ -977,6 +1015,9 @@ function resolveB01PendingResponse(
 
 module.exports = {
   describeDroppedFrames,
+  noteAcceptedFrame,
+  noteDroppedFrame,
+  resetFrameCounters,
   isRpcReplyFrame,
   resolveB01PendingResponse,
   roborock_mqtt_connector,

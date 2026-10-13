@@ -3595,6 +3595,23 @@ class Roborock {
       0
     );
     const isMapRequest = method === "get_map_v1";
+    // CORRECTED AGAIN IN 3.38.0, and this half was worse than the one above:
+    // the line accused this plugin of a bug on the strength of a counter whose
+    // commonest reason means the opposite.
+    //
+    // `addressed-elsewhere` means the 301 frame named a DIFFERENT controller.
+    // The endpoint is account-wide, not plugin-wide — the Roborock app open on
+    // a phone, a second Homebridge, a voice skill, each has its own, and all
+    // of them share the robot's MQTT topic. Their replies land here and are
+    // dropped, which is correct; they were never ours. #28 was told "it is a
+    // bug here, not on your robot" over 30 such frames while the app was open
+    // during a scheduled clean.
+    //
+    // One case genuinely is ours — our own endpoint being wrong — and it is
+    // told apart by the frames we DID accept. If the key were wrong, nothing
+    // would ever be addressed to us, so a single accepted frame acquits it.
+    const addressedElsewhere = dropped.byReason["addressed-elsewhere"] || 0;
+    const droppedThoughOurs = discarded - addressedElsewhere;
     let verdict;
     if (this.isB01Device(duid)) {
       // A B01 request goes on the wire under a translated name and its late
@@ -3602,12 +3619,17 @@ class Roborock {
       verdict = "";
     } else if (lateReplies > 0) {
       verdict = ` ${lateReplies} repl${lateReplies === 1 ? "y" : "ies"} to ${method} did arrive, but only after the plugin had stopped waiting (10 seconds), so the robot IS answering, just too slowly to be used.`;
-    } else if (isMapRequest && discarded > 0) {
-      verdict = ` NOTE: ${discarded} map reply frame(s) for this robot were received and then discarded by the plugin (${discardedByReason
+    } else if (isMapRequest && droppedThoughOurs > 0) {
+      verdict = ` NOTE: ${droppedThoughOurs} map reply frame(s) addressed to this plugin were received and then discarded (${discardedByReason
+        .filter(([reason]) => reason !== "addressed-elsewhere")
         .map(([reason, count]) => `${reason}: ${count}`)
         .join(
           ", "
         )}), so the robot IS answering and this side is throwing it away. Please report this — it is a bug here, not on your robot.`;
+    } else if (isMapRequest && addressedElsewhere > 0 && dropped.accepted > 0) {
+      verdict = ` NOTE: ${addressedElsewhere} map reply frame(s) seen for this robot were addressed to a different controller on the same Roborock account — the Roborock app being open on a phone does exactly this — so they were not this plugin's replies and discarding them is correct. ${dropped.accepted} frame(s) have been addressed to this plugin and accepted, so nothing is wrong on this side; no reply to this plugin's own map request arrived.`;
+    } else if (isMapRequest && addressedElsewhere > 0) {
+      verdict = ` NOTE: ${addressedElsewhere} map reply frame(s) seen for this robot were addressed to a different controller, and not one map reply frame has ever been addressed to this plugin. That points at the account key this plugin addresses its requests with, so please report this — it is a bug here, not on your robot.`;
     } else {
       verdict = ` No late reply to ${method} has arrived either${isMapRequest ? ", and no map reply frame was received and discarded" : ""}, so the reply is not arriving at all rather than arriving late or being lost on this side.`;
     }

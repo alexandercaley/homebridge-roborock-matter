@@ -4529,8 +4529,28 @@ export default class RoborockMatterVacuumAccessory {
       (areaId) => !supportedAreas.has(areaId)
     );
 
+    // WHAT ARRIVED, NOT ONLY WHAT WAS UNDERSTOOD — #24.
+    //
+    // The line used to print the normalised ids alone, so "the controller
+    // cleared the selection" and "the controller sent eight ids and this
+    // plugin read none of them" were the same five characters: `none`. #24
+    // reported a selection that reverts when all eight rooms are picked, and
+    // the only log line covering it could not say which of the two had
+    // happened — a week per guess, at one run a week.
+    const requestedCount = Array.isArray(newAreas) ? newAreas.length : null;
+    const unreadable =
+      requestedCount === null ? 0 : requestedCount - selectedAreas.length;
+    const requestDetail =
+      requestedCount === null
+        ? " (the controller sent no area list)"
+        : requestedCount === 0
+          ? " (the controller sent an empty list)"
+          : unreadable > 0
+            ? ` (the controller sent ${requestedCount} entr${requestedCount === 1 ? "y" : "ies"}, ${unreadable} of which could not be read as an area id)`
+            : "";
+
     this.platform.log.info(
-      `Matter service area selection request for ${this.getVacuumName()}: ${selectedAreas.join(", ") || "none"}.`
+      `Matter service area selection request for ${this.getVacuumName()}: ${selectedAreas.join(", ") || "none"}${requestDetail}.`
     );
 
     if (unsupportedArea !== undefined) {
@@ -4546,8 +4566,12 @@ export default class RoborockMatterVacuumAccessory {
         .filter((area): area is MatterServiceArea => area !== undefined)
     );
     if (selectedMapIds.length > 1) {
+      // A refused selection is not a cleared one: the controller keeps the set
+      // it last had accepted. That is precisely the "it falls back to the two
+      // rooms I cleaned this morning" of #24, and the old warning described
+      // neither the cause (which maps) nor the visible effect (the revert).
       this.platform.log.warn(
-        `Ignoring Matter service area selection spanning multiple Roborock maps for ${this.getVacuumName()}; select areas from one map at a time.`
+        `Ignoring Matter service area selection spanning ${selectedMapIds.length} Roborock maps for ${this.getVacuumName()} (maps ${selectedMapIds.join(", ")}; areas ${selectedAreas.join(", ")}); select areas from one map at a time. The selection is refused, not cleared, so the controller will keep showing the previous selection.`
       );
       return {
         status: SERVICE_AREA_SELECT_STATUS.INVALID_SET,
