@@ -248,6 +248,11 @@ class roborock_mqtt_connector {
   }
 
   async initUser(userdata) {
+    // A startService retry runs this again. Without ending the client the
+    // failed attempt left behind, two clients shared one clientId: the broker
+    // kept disconnecting one for the other, both kept reconnecting, and the
+    // old one still delivered every frame and was never ended at shutdown.
+    this.disconnect();
     rriot = userdata.rriot;
 
     endpoint = roborockCrypto
@@ -543,7 +548,7 @@ class roborock_mqtt_connector {
               `Cloud message with protocol 102 received. Result: ${data.payload}`
             );
 
-            if (this.adapter.deviceNotify !== undefined) {
+            if (this.adapter.deviceNotify) {
               this.adapter.deviceNotify("CloudMessage", {
                 duid,
                 payload: JSON.parse(data.payload),

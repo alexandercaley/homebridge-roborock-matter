@@ -790,7 +790,7 @@ class localConnector {
       }
       resolve(result);
 
-      if (this.adapter.deviceNotify !== undefined) {
+      if (this.adapter.deviceNotify) {
         this.adapter.deviceNotify("LocalMessage", {
           duid,
           payload: result,

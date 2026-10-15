@@ -131,6 +131,9 @@ beforeEach(async () => {
       r: { m: "mqtts://broker.example" },
     },
   });
+  // initUser ends whatever client the previous test left on the module; that
+  // teardown is setup, not something a test below did.
+  mockClient.end.mockClear();
   await connector.initMQTT_Subscribe();
   await connector.initMQTT_Message();
   mockHandlers.get("connect")({ sessionPresent: false });

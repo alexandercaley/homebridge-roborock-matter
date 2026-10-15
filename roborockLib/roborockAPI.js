@@ -2050,6 +2050,14 @@ class Roborock {
           this.log.debug(`RoomIDs debug: ${JSON.stringify(this.roomIDs)}`);
 
           // Perform a periodic MQTT health check. Reconnect only if needed.
+          // A retried start reaches this line again; the timers of the
+          // attempt that failed after it must not keep running beside these.
+          if (this.reconnectIntervall) {
+            this.clearInterval(this.reconnectIntervall);
+          }
+          if (this.homedataInterval) {
+            this.clearInterval(this.homedataInterval);
+          }
           this.reconnectIntervall = this.setInterval(async () => {
             this.log.debug(`Running MQTT health check.`);
 
@@ -2236,6 +2244,18 @@ class Roborock {
           // is exactly what shutdown looks like; it must not stop the rest.
         }
         this.pendingRequests.delete(messageID);
+      }
+      // B01 map requests keep their own 20-second timer outside
+      // pendingRequests. Left alone, it fired after shutdown and ran the
+      // live-room failure handling against a stopped adapter.
+      for (const [duid, pending] of this.pendingB01MapRequests ?? []) {
+        this.clearTimeout(pending?.timeout);
+        try {
+          pending?.reject?.(new Error("Homebridge is shutting down."));
+        } catch {
+          // Same as above: nobody listening is what shutdown looks like.
+        }
+        this.pendingB01MapRequests.delete(duid);
       }
       this.bInited = false;
     } catch (e) {
@@ -4260,6 +4280,9 @@ class Roborock {
    *   caller passes nothing and fetches fresh, as before.
    */
   async updateHomeData(homeId, prefetched) {
+    if (this.stopped) {
+      return;
+    }
     this.log.debug(`Updating HomeData with homeId: ${homeId}`);
     if (this.api) {
       try {
@@ -4267,6 +4290,12 @@ class Roborock {
           ? prefetched
           : (await this.api.get(`user/homes/${homeId}`)).data.result;
 
+        // A refresh still on the wire when Homebridge stops lands here after
+        // stopService, and superviseDeviceIntervals would start the polling
+        // loops again against transports that are already closed.
+        if (this.stopped) {
+          return;
+        }
         if (homedata) {
           this.superviseDeviceIntervals();
           await this.refreshLocalKeysFromHomeData(homedata);
@@ -5564,7 +5593,7 @@ class Roborock {
           );
         }
 
-        if (this.deviceNotify !== undefined) {
+        if (this.deviceNotify) {
           this.deviceNotify("CloudMessage", { duid, payload: [v1Status] });
         }
 
@@ -6022,6 +6051,9 @@ class Roborock {
         try {
           rawPayload = await this.sendB01MapRequest(duid, mapId);
         } catch (error) {
+          if (this.stopped) {
+            return liveState.current;
+          }
           this.noteLiveRoomFetchFailed(
             duid,
             liveState,
