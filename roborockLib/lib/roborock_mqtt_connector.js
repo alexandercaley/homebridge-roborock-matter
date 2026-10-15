@@ -298,12 +298,11 @@ class roborock_mqtt_connector {
       this.initialConnectTimeout.unref();
     }
 
-    const subscribedClient = client;
     // mqtt.js resubscribes before our connect handler. A subscribe callback
     // can therefore contain no grants even though a real SUBACK follows.
     // Observe that packet without changing mqtt.js subscription behaviour.
-    subscribedClient.on("packetreceive", (packet) => {
-      if (client !== subscribedClient || packet.cmd !== "suback") return;
+    this.listen("packetreceive", (packet) => {
+      if (packet.cmd !== "suback") return;
       this.sessionDiagnostics.onSubscribe(
         this.sessionDiagnostics.generation,
         null,
@@ -311,17 +310,20 @@ class roborock_mqtt_connector {
       );
     });
 
-    await client.on("connect", (result) => {
+    this.listen("connect", (result) => {
       if (typeof result != "undefined") {
         const generation = this.sessionDiagnostics.onConnect();
-        client.subscribe(`rr/m/o/${rriot.u}/${mqttUser}/#`, (err, granted) => {
-          this.sessionDiagnostics.onSubscribe(generation, err, granted);
-          if (err) {
-            this.logConnectionIssue(
-              `Failed to subscribe to the Roborock MQTT server: ${err} (granted: ${JSON.stringify(granted)}).`
-            );
-          }
-        });
+        client.subscribe(
+          `rr/m/o/${rriot.u}/${mqttUser}/#`,
+          this.whileCurrent((err, granted) => {
+            this.sessionDiagnostics.onSubscribe(generation, err, granted);
+            if (err) {
+              this.logConnectionIssue(
+                `Failed to subscribe to the Roborock MQTT server: ${err} (granted: ${JSON.stringify(granted)}).`
+              );
+            }
+          })
+        );
         this.clearInitialConnectTimeout();
 
         this.connected = true;
@@ -343,7 +345,7 @@ class roborock_mqtt_connector {
     // instead of routing them through catchError (which used to produce the
     // misleading `Failed to execute client.on("error") on robot undefined`
     // spam twice per reconnect attempt during network outages).
-    await client.on("error", (error) => {
+    this.listen("error", (error) => {
       this.connected = false;
       this.sessionDiagnostics.onDisconnect();
       this.logConnectionIssue(
@@ -351,7 +353,7 @@ class roborock_mqtt_connector {
       );
     });
 
-    await client.on("close", () => {
+    this.listen("close", () => {
       if (this.connected) {
         this.adapter.log.info(`MQTT connection closed; reconnecting.`);
       }
@@ -359,21 +361,24 @@ class roborock_mqtt_connector {
       this.sessionDiagnostics.onDisconnect();
     });
 
-    await client.on("reconnect", () => {
+    this.listen("reconnect", () => {
       // Preserve the legacy subscription. Its callback is not evidence for
       // a new generation; actual SUBACK packets are observed above.
-      client.subscribe(`rr/m/o/${rriot.u}/${mqttUser}/#`, (err, granted) => {
-        if (err) {
-          this.logConnectionIssue(
-            `Failed to subscribe to the Roborock MQTT server after reconnect: ${err} (granted: ${JSON.stringify(granted)}).`
-          );
-        }
-      });
+      client.subscribe(
+        `rr/m/o/${rriot.u}/${mqttUser}/#`,
+        this.whileCurrent((err, granted) => {
+          if (err) {
+            this.logConnectionIssue(
+              `Failed to subscribe to the Roborock MQTT server after reconnect: ${err} (granted: ${JSON.stringify(granted)}).`
+            );
+          }
+        })
+      );
       this.clearInitialConnectTimeout();
       this.adapter.log.debug(`MQTT connection reconnect attempt.`);
     });
 
-    await client.on("offline", () => {
+    this.listen("offline", () => {
       this.connected = false;
       this.sessionDiagnostics.onDisconnect();
       this.logConnectionIssue(
@@ -465,7 +470,7 @@ class roborock_mqtt_connector {
   async initMQTT_Message() {
     this.adapter.log.debug(`MQTT initialized.`);
 
-    client.on("message", (topic, message) => {
+    this.listen("message", (topic, message) => {
       try {
         this.sessionDiagnostics.noteActivity("raw");
         const duid = this.resolveDuidFromTopic(topic);
@@ -871,6 +876,11 @@ class roborock_mqtt_connector {
    *   timeout and reading a dead link as a silent robot.
    */
   sendMessage(duid, roborockMessage, onNotSent) {
+    if (!client) {
+      // Shut down between the caller's connection check and this publish.
+      onNotSent?.(new Error("The MQTT client is closed"));
+      return;
+    }
     client.publish(
       `rr/m/i/${rriot.u}/${mqttUser}/${duid}`,
       roborockMessage,
@@ -888,6 +898,28 @@ class roborock_mqtt_connector {
   }
 
   /**
+   * Listen to the current client for as long as it is the current one.
+   *
+   * A client `disconnect` has let go of keeps its listeners, and they ignore
+   * it. Removing them instead (removeAllListeners) also removed mqtt.js's
+   * own, among them the 'close' handler that cancels the CONNACK timer. A
+   * client closed mid-handshake — a startService retry during a network
+   * outage — then emitted "connack timeout" 30 s later with no 'error'
+   * listener left, and an unhandled 'error' event ends the process.
+   */
+  listen(event, handler) {
+    client.on(event, this.whileCurrent(handler));
+  }
+
+  /** `fn`, run only while the client current now is still the current one. */
+  whileCurrent(fn) {
+    const owner = client;
+    return (...args) => {
+      if (client === owner) fn(...args);
+    };
+  }
+
+  /**
    * Close the MQTT session on shutdown.
    *
    * `client.end()` existed in exactly 1 place in this codebase — inside
@@ -899,15 +931,18 @@ class roborock_mqtt_connector {
    * `end(true)` rather than a graceful close: there is nothing left worth
    * flushing to a broker at this point, and a graceful close can wait on an
    * ack that will not come if the network is what is broken.
+   *
+   * The client is let go of, not stripped of its listeners (see `listen`).
    */
   disconnect() {
     this.clearInitialConnectTimeout();
-    if (!client) {
+    const closing = client;
+    client = undefined;
+    if (!closing) {
       return;
     }
     try {
-      client.removeAllListeners();
-      client.end(true);
+      closing.end(true);
     } catch (error) {
       this.adapter?.log?.debug?.(
         `Closing the MQTT client on shutdown failed: ${error?.message || error}`
@@ -983,8 +1018,13 @@ class roborock_mqtt_connector {
         // after the network was healthy, three retries that did nothing, and
         // an instant recovery on the same session once the child bridge was
         // restarted.
-        await client.endAsync(true);
-        client.reconnect();
+        const current = client;
+        await current.endAsync(true);
+        // Shut down, or replaced by a retried start, while the link closed.
+        if (client !== current) {
+          return false;
+        }
+        current.reconnect();
         return true;
       } catch (error) {
         this.adapter.catchError(

@@ -151,7 +151,12 @@ describe("a retried start", () => {
 
     expect(clients).toHaveLength(2);
     expect(clients[0].ended).toBe(true);
-    expect(clients[0].listenerCount("message")).toBe(0);
+    // The old client's frames reach nothing; the new client's do.
+    const route = jest.spyOn(api.rr_mqtt_connector, "resolveDuidFromTopic");
+    clients[0].emit("message", "rr/m/o/u/x/d1", Buffer.alloc(0));
+    expect(route).not.toHaveBeenCalled();
+    clients[1].emit("message", "rr/m/o/u/x/d1", Buffer.alloc(0));
+    expect(route).toHaveBeenCalledTimes(1);
     expect(live.size).toBe(intervalsAfterFailure);
 
     await api.stopService();
