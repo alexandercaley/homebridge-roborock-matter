@@ -488,6 +488,9 @@ export function isHapScheduleAccessory(accessory: {
  *   <vacuum> Schedule 2
  *   ...
  *
+ * A schedule that belongs to a Routine (a cloud scene) is named after the
+ * Routine instead, as the app shows it, and does not use up a number.
+ *
  * The manager UUID/context is derived from the vacuum duid. Each Switch
  * service subtype is derived from the schedule ID. Display names are not
  * identity and must never overwrite the shared manager accessory identity.

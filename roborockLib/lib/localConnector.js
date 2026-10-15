@@ -530,7 +530,6 @@ class localConnector {
           duid,
           "marked-remote-after-connect-failure"
         );
-        // this.adapter.catchError(`Failed to create tcp client: ${error.stack}`, `function createClient`, duid);
       }
     });
 
@@ -613,7 +612,6 @@ class localConnector {
         this.adapter.log.debug(`new chunk received`);
         client.chunkBuffer = Buffer.concat([client.chunkBuffer, message]);
       }
-      // this.adapter.log.debug(`new chunk received: ${message.toString("hex")}`);
 
       const scan = this.scanChunkBuffer(client.chunkBuffer);
 
@@ -646,7 +644,6 @@ class localConnector {
             `Chunk buffer data is complete. Processing...`
           );
         }
-        // this.adapter.log.debug(`chunkBuffer: ${buffer.toString("hex")}`);
         while (offset < scan.consumed) {
           const segmentLength = buffer.readUInt32BE(offset);
           const currentBuffer = buffer.subarray(
@@ -1187,10 +1184,14 @@ class localConnector {
 
         try {
           const parsedMessage = localMessageParser.parse(msg);
+          // Discovery broadcasts are read as AES-128-ECB under the shared
+          // BROADCAST_TOKEN. A payload in any other scheme comes back as null
+          // or as garbage that fails JSON.parse, and is skipped below like any
+          // other malformed datagram.
           const decodedMessage = this.decryptECB(
             parsedMessage.payload,
             BROADCAST_TOKEN
-          ); // this might be decryptCBC for A01. Haven't checked this yet
+          );
 
           if (decodedMessage == null) {
             this.adapter.log.debug(`getLocalDevices: decodedMessage is null`);
@@ -1307,13 +1308,12 @@ class localConnector {
       ]);
       const unpadded = this.safeRemovePkcs7(decryptedBuf);
 
-      // 若原協定內容是 UTF-8，這裡再轉字串；否則直接回傳 Buffer 讓上層處理
+      // Always a UTF-8 string, never a Buffer: the discovery handler feeds it
+      // straight to JSON.parse.
       return unpadded.toString("utf8");
     } catch (err) {
       // 例如 wrong final block length、key 不對等情況
       // 這裡不要讓程式炸掉，直接忽略這個封包
-      // 你也可以在這裡做一次 debug log
-      // console.debug("decryptECB error:", err);
       return null;
     }
   }

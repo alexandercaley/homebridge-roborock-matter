@@ -57,11 +57,12 @@ const COOLDOWN_MS = 6 * 60 * 60 * 1000;
 /**
  * Whether an error means "the request was sent and nothing came back".
  *
- * Matched on the message because that is what every layer below hands up:
- * `messageQueueHandler` rejects with `Cloud request with id N with method M
- * timed out after 10 seconds` (and the local equivalent). A transport failure
- * reads differently and is excluded by name, because retrying through a
- * network blip is right and tripping on one is not.
+ * Decided by the `unansweredRequest` and `transportWasUp` fields that
+ * `messageQueueHandler` puts on its timeout errors (`Cloud request with id N
+ * with method M timed out after 10 seconds`, and the local equivalent). An
+ * error without those fields falls back to matching the message, where a
+ * transport failure reads differently and is excluded by name, because
+ * retrying through a network blip is right and tripping on one is not.
  *
  * @param {unknown} error
  * @returns {boolean}
@@ -103,17 +104,18 @@ function isUnansweredRequest(error) {
     return false;
   }
 
-  // THE ONE THAT ACTUALLY FIRES, and the reason 3.30.0's exclusion was dead
-  // code. messageQueueHandler builds the two timeout messages with the
-  // connection state interpolated as a BOOLEAN:
+  // A FALLBACK, like everything from here down: every timeout
+  // messageQueueHandler raises carries `unansweredRequest` and is decided by
+  // the structured check above, so these prose checks only see an error that
+  // arrives without the flag. messageQueueHandler interpolates the connection
+  // state into the message as a BOOLEAN:
   //
-  //   `… timed out after 10 seconds. MQTT connection state: ${mqttConnectionState}`
-  //   `… timed out after 10 seconds Local connect state: ${localConnectionState}`
+  //   `… timed out after 10 seconds. MQTT connection state: ${transportWasUp}`
+  //   `… timed out after 10 seconds Local connect state: ${transportWasUp}`
   //
-  // so a link that was down while the request was pending reads
-  // "MQTT connection state: false" — which matches none of the names above.
-  // The whole exclusion had nothing left to exclude, and a four-minute
-  // network blip could therefore trip the breaker and suppress a perfectly
+  // so a link that was down reads "MQTT connection state: false" — which
+  // matches none of the names above. Letting that through would let a
+  // four-minute network blip trip the breaker and suppress a perfectly
   // healthy method for six hours, under a log line claiming this was "not a
   // connection failure". Read the boolean instead.
   if (/(MQTT connection state|Local connect state):\s*false/i.test(message)) {

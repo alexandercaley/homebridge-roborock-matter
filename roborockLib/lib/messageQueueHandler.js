@@ -737,8 +737,6 @@ class messageQueueHandler {
             this.adapter.log.debug(
               `Sent payload for ${duid} with ${payload} using cloud connection`
             );
-            //client.publish(`rr/m/i/${rriot.u}/${mqttUser}/${duid}`, roborockMessage, { qos: 1 });
-            // this.adapter.log.debug(`Promise for messageID ${messageID} created. ${this.adapter.message._decodeMsg(roborockMessage, duid).payload}`);
           } else {
             const lengthBuffer = Buffer.alloc(4);
             lengthBuffer.writeUInt32BE(roborockMessage.length, 0);
@@ -750,7 +748,6 @@ class messageQueueHandler {
               lastTransportReason: "local-request",
               lastCommandMethod: method,
             });
-            // this.adapter.log.debug(`sent fullMessage: ${fullMessage.toString("hex")}`);
             this.adapter.log.debug(
               `Sent payload for ${duid} with ${payload} using local connection`
             );

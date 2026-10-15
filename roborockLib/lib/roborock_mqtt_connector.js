@@ -494,11 +494,7 @@ class roborock_mqtt_connector {
         if (typeof this.adapter.noteCloudMessageReceived === "function") {
           this.adapter.noteCloudMessageReceived(duid);
         }
-        // this.adapter.log.debug(`MESSAGE RECEIVED for duid ${duid} with key: ${this.adapter.localKeys.get(duid)} data: ${JSON.stringify(data)} raw: ${JSON.stringify(mqttMessageParser.parse(message))} message: ${message}`);
-        // this.adapter.log.debug(`MESSAGE RECEIVED for duid ${duid} with key: ${this.adapter.localKeys.get(duid)} data: ${JSON.stringify(data.toString("hex"))} message: ${message}`);
-        // this.adapter.log.debug(`MESSAGE RECEIVED for duid ${duid} with key: ${this.adapter.localKeys.get(duid)} data: ${JSON.stringify(data)}`);
 
-        // this.adapter.log.debug("Protocol: " + data.protocol);
         if (isRpcReplyFrame(data)) {
           const parsedPayload = JSON.parse(data.payload);
           let dps;
@@ -736,7 +732,6 @@ class roborock_mqtt_connector {
                 decipher.final(),
               ]);
               decrypted = zlib.gunzipSync(decrypted);
-              // this.adapter.log.debug("raw 301: " + decrypted);
 
               if (!this.adapter.pendingRequests.has(data2.id)) {
                 // The other silent drop on this path. An unsolicited map push
@@ -769,7 +764,6 @@ class roborock_mqtt_connector {
                 );
                 this.adapter.clearTimeout(timeout);
                 this.adapter.pendingRequests.delete(data2.id);
-                // this.adapter.log.debug("protocol 301 OK check: " + JSON.stringify(decrypted));
                 this.adapter.log.debug(
                   `Cloud message with protocol 301 and id ${data2.id} received.`
                 );

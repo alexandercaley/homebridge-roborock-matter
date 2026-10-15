@@ -72,7 +72,6 @@ class message {
     const timestamp = Math.floor(Date.now() / 1000);
     const endpoint = this.adapter.rr_mqtt_connector.getEndpoint();
     const version = await this.adapter.getRobotVersion(duid);
-    // this.adapter.log.debug("sendRequest started with: " + requestId);
 
     if (photo) {
       params.endpoint = endpoint;
@@ -337,7 +336,6 @@ class message {
       this.adapter.log.error(
         `failed to _decodeMsg for ${describeDevice(this.adapter, duid)}: ${reason} (len=${message.length}, preview=${preview})`
       );
-      // this.adapter.catchError(error, "_decodeMessage", "none");
       return null;
     }
   }

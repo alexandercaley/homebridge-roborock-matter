@@ -186,12 +186,6 @@ function resetLiveRoomRunCounters(liveState) {
   liveState.placeholderReported = false;
 }
 
-// B01/Q7 status cadence. These were literals in three places — the two gap
-// values, the loop interval, and a hand-written startup line quoting all
-// three. 3.2.0 changed the idle gap from 45s to 25s and the startup line kept
-// announcing 45s, so the log contradicted the code for anyone reading it to
-// work out why a run took so long to show up. Naming them makes the message
-// derivable and the drift impossible.
 // Plain-language wording for each way a live-room lookup can come back empty.
 // "Between rooms" is only one of them, and it was the only one the log used
 // to name — which sent every investigation down the same wrong path.
@@ -298,6 +292,12 @@ function formatSurveyScalar(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(3);
 }
 
+// B01/Q7 status cadence. These were literals in three places — the two gap
+// values, the loop interval, and a hand-written startup line quoting all
+// three. 3.2.0 changed the idle gap from 45s to 25s and the startup line kept
+// announcing 45s, so the log contradicted the code for anyone reading it to
+// work out why a run took so long to show up. Naming them makes the message
+// derivable and the drift impossible.
 const B01_STATUS_TICK_MS = 15000;
 const B01_STATUS_FORCED_GAP_MS = 1500;
 const B01_STATUS_ACTIVE_GAP_MS = 12000;
@@ -609,8 +609,12 @@ class Roborock {
   }
 
   /**
-   * Every timer in this library goes through here, which is why 2 rules live
-   * in these 4 lines rather than at each of the ~20 call sites.
+   * Most timers in this library go through here — this class's own and those
+   * the connectors and queue handler create via `this.adapter` — which is why
+   * 2 rules live in these few lines rather than at each of the ~20 call sites.
+   * A handful call the global directly (schedulePersistFlush, the initial
+   * status wait cap, the startService retry, and two in the MQTT connector);
+   * each of those unrefs its own handle and catches its own errors.
    *
    * **Unref.** `src/timers.ts` states the policy — "a pending timer must
    * never be why Homebridge cannot shut down" — and `src/` honours it at all
@@ -1817,7 +1821,14 @@ class Roborock {
   }
 
   /**
-   * Is called when databases are connected and adapter received configuration.
+   * Bring the Roborock side up: log in (or reuse the stored session), fetch
+   * the home details, start the MQTT session and the periodic health check
+   * and home-data refresh, create a runtime per robot and take the first
+   * status. Called by the platform at launch, and again by the retry timers
+   * after a failed login or home-details fetch. `callback` runs once the
+   * home-details stage has been attempted, whether it succeeded or not
+   * (`isInited()` says which); a login that fails returns before that, so the
+   * callback does not run for that attempt.
    */
   async startService(callback) {
     // A deliberate start clears the shutdown latch: Homebridge restarts a
@@ -2032,8 +2043,6 @@ class Roborock {
             // device keeps reporting itself as cloud-only.
             await this.syncCloudOnlyTransportMarkers(device.duid, cloudOnly);
           }
-
-          // this.adapter.log.debug(`initUser test: ${JSON.stringify(Array.from(this.adapter.localKeys.entries()))}`);
 
           await this.rr_mqtt_connector.initUser(userdata);
           await this.rr_mqtt_connector.initMQTT_Subscribe();
@@ -3312,14 +3321,6 @@ class Roborock {
   }
 
   /**
-   * Poll one v1 parameter, unless the robot speaks a dialect that has no
-   * answer for it. Every periodic probe goes through here so the rule holds
-   * for probes added later, not just the three that were reported.
-   * @param {string} duid @param {any} vacuum @param {string} method
-   * @param {boolean} isB01
-   * @returns {Promise<any>}
-   */
-  /**
    * Is it time to re-read a robot's slow-changing parameters?
    *
    * The first cycle after start always qualifies (nothing recorded yet), so a
@@ -3350,6 +3351,14 @@ class Roborock {
     this.lastSlowParameterPollAt.delete(duid);
   }
 
+  /**
+   * Poll one v1 parameter, unless the robot speaks a dialect that has no
+   * answer for it. Every periodic probe goes through here so the rule holds
+   * for probes added later, not just the three that were reported.
+   * @param {string} duid @param {any} vacuum @param {string} method
+   * @param {boolean} isB01
+   * @returns {Promise<any>}
+   */
   async pollParameter(duid, vacuum, method, isB01) {
     if (isB01 && !b01Q7Adapter.canAnswerV1Method(method)) {
       const key = `${duid}:${method}`;
@@ -3643,7 +3652,6 @@ class Roborock {
     if (online) {
       this.log.debug(`${duid} online. Starting mainUpdateInterval.`);
       this.vacuums[duid].mainUpdateInterval(); // actually start mainUpdateInterval()
-      // Map updater gets startet automatically via getParameter with get_status
     }
   }
 
@@ -4719,38 +4727,6 @@ class Roborock {
   }
 
   /**
-   * Ask the Roborock CLOUD where a robot's schedules live (#22).
-   *
-   * Some newer robots decline the device-side `get_server_timer` outright —
-   * a Saros 10R (`roborock.vacuum.a144`) answers `-10007 "Not FCC robot"` on
-   * every attempt, while the legacy `get_timer` honestly answers `[]`. Both
-   * answers are true: that robot has no DEVICE-side timers. Its owner
-   * demonstrably has three daily schedules in the app, under the robot's own
-   * Schedule screen, so they are held server-side on routes the device
-   * protocol knows nothing about.
-   *
-   * This is a MEASUREMENT, not a feature. It reads the two candidate routes
-   * and prints what came back, so the next release can map a real payload
-   * instead of a guess. Deliberately constrained:
-   *
-   * - **Debug only.** Silent for every installation that has not asked for it.
-   * - **Safe methods only — GET and OPTIONS.** Nothing here can change a
-   *   schedule. OPTIONS carries no body: it asks a resource which methods it
-   *   accepts, which is how you find a write target without attempting one.
-   *   (Until 3.29.0 the Hawk interceptor also signed every body empty, so a
-   *   write could not even have authenticated; it signs bodies now, and the
-   *   writes live in `updateCloudSceneParam` / `setCloudSceneEnabled`, each
-   *   behind its own `Allow` gate.)
-   * - **Once per robot per session,** so a poll cadence cannot turn it into
-   *   traffic.
-   * - **Never throws.** A probe that breaks startup would be worse than the
-   *   missing feature it investigates.
-   *
-   * @param {string} duid Robot to probe.
-   * @returns {Promise<Record<string, unknown> | undefined>} Per-route outcome,
-   *   or `undefined` when the probe did not run.
-   */
-  /**
    * Turn a cloud schedule answer into legible lines, or nothing.
    *
    * Wrapped because it decorates a diagnostic that rides on a live poll: a
@@ -4943,6 +4919,38 @@ class Roborock {
     }
   }
 
+  /**
+   * Ask the Roborock CLOUD where a robot's schedules live (#22).
+   *
+   * Some newer robots decline the device-side `get_server_timer` outright —
+   * a Saros 10R (`roborock.vacuum.a144`) answers `-10007 "Not FCC robot"` on
+   * every attempt, while the legacy `get_timer` honestly answers `[]`. Both
+   * answers are true: that robot has no DEVICE-side timers. Its owner
+   * demonstrably has three daily schedules in the app, under the robot's own
+   * Schedule screen, so they are held server-side on routes the device
+   * protocol knows nothing about.
+   *
+   * This is a MEASUREMENT, not a feature. It reads the two candidate routes
+   * and prints what came back, so the next release can map a real payload
+   * instead of a guess. Deliberately constrained:
+   *
+   * - **Debug only.** Silent for every installation that has not asked for it.
+   * - **Safe methods only — GET and OPTIONS.** Nothing here can change a
+   *   schedule. OPTIONS carries no body: it asks a resource which methods it
+   *   accepts, which is how you find a write target without attempting one.
+   *   (Until 3.29.0 the Hawk interceptor also signed every body empty, so a
+   *   write could not even have authenticated; it signs bodies now, and the
+   *   writes live in `updateCloudSceneParam` / `setCloudSceneEnabled`, each
+   *   behind its own `Allow` gate.)
+   * - **Once per robot per session,** so a poll cadence cannot turn it into
+   *   traffic.
+   * - **Never throws.** A probe that breaks startup would be worse than the
+   *   missing feature it investigates.
+   *
+   * @param {string} duid Robot to probe.
+   * @returns {Promise<Record<string, unknown> | undefined>} Per-route outcome,
+   *   or `undefined` when the probe did not run.
+   */
   async probeCloudScheduleRoutes(duid) {
     if (!duid || !this.config?.debug || !this.api) {
       return undefined;
@@ -5486,12 +5494,12 @@ class Roborock {
     // dispatched on the existing live-message path so the Matter accessory
     // updates exactly like it does for classic robots.
     //
-    // The 1-second poll tick relies on getParameter's internal throttling for
-    // classic robots; this path must throttle itself or every tick becomes a
-    // cloud request. Periodic refreshes are paced by the adaptive cadence
-    // below, forced
-    // refreshes (post-command, robot pushes) at most every 1.5s, and
-    // concurrent callers share one in-flight request.
+    // Classic robots' 15-second status tick relies on getParameter's internal
+    // throttling; this path, ticked every 15 seconds by the B01 loop, must
+    // throttle itself or every tick becomes a cloud request. Periodic
+    // refreshes are paced by the adaptive cadence below, forced refreshes
+    // (post-command, robot pushes) at most every 1.5s, and concurrent callers
+    // share one in-flight request.
     if (!this._b01StatusState) {
       this._b01StatusState = new Map();
     }
@@ -5511,7 +5519,7 @@ class Roborock {
     }
 
     // Throttle on ATTEMPTS, not successes: a robot or cloud that stops
-    // answering must not turn the 1-second poll tick into a retry storm.
+    // answering must not turn the 15-second poll tick into a retry storm.
     // Adaptive cadence: while the robot is actively working (cleaning,
     // returning, docking) every 15s loop tick is allowed through so state
     // transitions reach Matter controllers within seconds; at rest the
@@ -5638,12 +5646,6 @@ class Roborock {
   }
 
   /**
-   * B01 robots never enter the v1 getParameter flow that normally restarts
-   * device intervals after an offline period, so one online flap would kill
-   * their status polling forever. Called from the periodic HomeData refresh
-   * as a supervisor: restarts intervals when a B01 robot is back online.
-   */
-  /**
    * Re-check every robot's polling intervals, from the home-data refresh.
    *
    * THIS USED TO SKIP EVERY CLASSIC ROBOT, AND THAT WAS A DEAD END IT COULD
@@ -5677,17 +5679,26 @@ class Roborock {
     }
   }
 
-  /** @deprecated Kept so existing callers and tests keep working. */
+  /**
+   * The supervisor's name from when it covered only B01 robots: they never
+   * enter the v1 getParameter flow that normally restarts device intervals
+   * after an offline period, so one online flap would kill their status
+   * polling forever. superviseDeviceIntervals now covers every robot.
+   * @deprecated Kept so existing callers and tests keep working.
+   */
   superviseB01DeviceIntervals() {
     this.superviseDeviceIntervals();
   }
 
   /**
    * Dedicated status loop for B01/Q7 robots, independent of the fragile
-   * per-device v1 interval machinery. Ticks every 15 seconds and asks
-   * getStatus for every initialized B01 device; the attempt throttle keeps
-   * the effective cloud cadence at ~45s. Idempotent: safe to call from the
-   * HomeData supervisor, which revives the loop if anything cleared it.
+   * per-device v1 interval machinery. Ticks every B01_STATUS_TICK_MS (15s)
+   * and asks getStatus for every initialized B01 device; the attempt
+   * throttle in refreshB01Status keeps requests at least 12s apart while the
+   * robot is working and 25s apart at rest, which on a 15s tick lets every
+   * tick through while working and every other tick at rest. Idempotent:
+   * safe to call from the HomeData supervisor, which revives the loop if
+   * anything cleared it.
    */
   startB01StatusLoop() {
     if (this.b01StatusLoopHandle) {

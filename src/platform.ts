@@ -563,9 +563,10 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
           } device(s) from getVacuumList().`
         );
 
-        // Every robot is published as a native Matter vacuum. The only HAP
-        // accessories this plugin registers are the opt-in action switches
-        // below; the robot itself never appears over HomeKit.
+        // Every robot is published as a native Matter vacuum; the robot
+        // itself never appears over HomeKit. Everything this plugin registers
+        // over HAP is opt-in and synced below: the schedule and Routine
+        // switches, the action switches and the state sensors.
         for (const device of devices) {
           await self.discoverMatterVacuum(device);
         }
@@ -600,15 +601,6 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
     }
   }
 
-  /**
-   * Bring the HAP schedule accessories in line with the current Roborock
-   * account. Schedule accessories are intentionally kept separate from
-   * Mathias's Matter implementation and from the HAP action switches.
-   *
-   * An empty device list is treated as untrustworthy because it can result
-   * from a temporary Roborock/cloud failure. Never remove schedule
-   * accessories merely because discovery returned no devices.
-   */
   /**
    * Schedule groups are controlled by the same Home app switch master as the
    * other optional HAP switches. "schedules" is intentionally not part of
@@ -843,6 +835,15 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
     });
   }
 
+  /**
+   * Bring the HAP schedule and Routine accessories in line with the current
+   * Roborock account. Both are intentionally kept separate from
+   * Mathias's Matter implementation and from the HAP action switches.
+   *
+   * An empty device list is treated as untrustworthy because it can result
+   * from a temporary Roborock/cloud failure. Never remove schedule
+   * accessories merely because discovery returned no devices.
+   */
   private syncHapSchedules(devices: any[]): void {
     const exposeSchedules = this.shouldExposeHapSchedules();
     const exposeRoutines = this.shouldExposeHapRoutines();

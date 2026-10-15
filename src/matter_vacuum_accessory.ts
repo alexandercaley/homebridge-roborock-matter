@@ -403,32 +403,6 @@ const DSS_TANK_NEEDS_ATTENTION = 1;
 const DOCK_TYPES_WITHOUT_TANKS: ReadonlySet<number> = new Set([0, 1, 5]);
 
 /**
- * Matter's own RVC OperationalError codes.
- *
- * 68 is `WaterTankEmpty`, and it is the attribute Apple Home draws as a tap
- * icon on the play button with a localised "refill the water tank" — the one
- * value in this list measured rendering on real hardware (a70, iOS 26.0).
- * 0 is `NoError` and has to be published too: an error attribute that is only
- * ever written when something is wrong never clears.
- *
- * WHY THIS LIST STOPS AT 71.
- *
- * The enum continues: the specification adds LowBattery (72),
- * CannotReachTargetArea (73), DirtyWaterTankFull (74), DirtyWaterTankMissing
- * (75), WheelsJammed (76), BrushJammed (77) and NavigationSensorObscured (78).
- * Several of those name a Roborock fault exactly, and mapping to them would
- * read better than the generic codes used below.
- *
- * They are all Matter 1.5. Everything from 0 to 71 has been in the cluster
- * since 1.2. Nothing here establishes which revision Apple implements, and
- * this file already carries one measurement of what Apple does with a value
- * it does not recognise: a manufacturer-range id in `operationalStateList`
- * leaves the tile in "Connecting" forever. A fault that renders as nothing
- * would only cost the message; a fault that wedges the accessory costs the
- * robot. Until somebody looks at a tile with 76 on it, the 1.2 set is what
- * gets published, and the accurate 1.5 name goes in the log line instead.
- */
-/**
  * The Matter cluster whose writes have to be ordered by hand. See
  * writeOperationalStateCluster().
  */
@@ -492,6 +466,32 @@ const OPERATIONAL_STATES_THAT_CARRY_A_FAULT: ReadonlySet<number> = new Set([
   RVC_OPERATIONAL_STATE.DOCKED,
 ]);
 
+/**
+ * Matter's own RVC OperationalError codes.
+ *
+ * 68 is `WaterTankEmpty`, and it is the attribute Apple Home draws as a tap
+ * icon on the play button with a localised "refill the water tank" — the one
+ * value in this list measured rendering on real hardware (a70, iOS 26.0).
+ * 0 is `NoError` and has to be published too: an error attribute that is only
+ * ever written when something is wrong never clears.
+ *
+ * WHY THIS LIST STOPS AT 71.
+ *
+ * The enum continues: the specification adds LowBattery (72),
+ * CannotReachTargetArea (73), DirtyWaterTankFull (74), DirtyWaterTankMissing
+ * (75), WheelsJammed (76), BrushJammed (77) and NavigationSensorObscured (78).
+ * Several of those name a Roborock fault exactly, and mapping to them would
+ * read better than the generic codes used below.
+ *
+ * They are all Matter 1.5. Everything from 0 to 71 has been in the cluster
+ * since 1.2. Nothing here establishes which revision Apple implements, and
+ * this file already carries one measurement of what Apple does with a value
+ * it does not recognise: a manufacturer-range id in `operationalStateList`
+ * leaves the tile in "Connecting" forever. A fault that renders as nothing
+ * would only cost the message; a fault that wedges the accessory costs the
+ * robot. Until somebody looks at a tile with 76 on it, the 1.2 set is what
+ * gets published, and the accurate 1.5 name goes in the log line instead.
+ */
 const RVC_OPERATIONAL_ERROR = {
   NO_ERROR: 0,
   UNABLE_TO_START_OR_RESUME: 1,
@@ -1128,6 +1128,11 @@ export default class RoborockMatterVacuumAccessory {
     return true;
   }
 
+  /** Ask to be told after every publish. Null clears it. */
+  setStateListener(listener: (() => void) | null): void {
+    this.stateListener = listener;
+  }
+
   /**
    * The value a read-only HAP state sensor should show, or null for "not yet".
    *
@@ -1153,11 +1158,6 @@ export default class RoborockMatterVacuumAccessory {
    * read can reach must not advance the state machine that decides what gets
    * published.
    */
-  /** Ask to be told after every publish. Null clears it. */
-  setStateListener(listener: (() => void) | null): void {
-    this.stateListener = listener;
-  }
-
   getHomeKitStateSensorValue(sensor: HomeKitStateSensorKey): boolean | null {
     if (!this.hasUsableRobotState()) {
       return null;
@@ -3562,26 +3562,10 @@ export default class RoborockMatterVacuumAccessory {
   }
 
   /**
-   * Makes the robot match the clean mode Apple Home is displaying, before a
-   * Matter-initiated start.
-   *
-   * This used to run only when the user had just CHANGED the mode — the flag
-   * was set by the ChangeToMode handler and by nothing else. That left the
-   * most ordinary case of all unhandled: the mode Home already shows is
-   * usually the mode the user wants, so they never tap it, so no ChangeToMode
-   * arrives, so nothing was sent and the robot ran in whatever mode it had
-   * been left in. Measured in #8: a "Vacuum" start with no preceding mode
-   * request sent no water command at all and the robot mopped, while the same
-   * start one explicit tap later sent it and vacuumed.
-   *
-   * Starting a clean is a promise that the robot will run in the displayed
-   * mode, so the mode is applied on every start, changed or not. It is
-   * deliberately NOT skipped when the robot looks like it already matches:
-   * the reading such a check would consult is exactly the one that lies — a
-   * docked robot's water-box status read as plain Vacuum for the robot that
-   * then mopped. The settings themselves preserve the user's levels (a
-   * vacuum-family mode keeps the robot's current suction, a mop-family mode
-   * its current water level), so applying pins the clean TYPE and nothing else.
+   * Apply a clean mode picked while the robot is already running or paused,
+   * and pin its clean type for the rest of this run. Throws when the robot
+   * does not confirm the settings, so the ChangeToMode handler rolls the
+   * selection back instead of showing a mode the robot is not in.
    */
   private async applyCleanModeDuringRun(cleanMode: number): Promise<void> {
     const applySettings = this.api.applyMatterCleanModeSettings;
@@ -3627,6 +3611,28 @@ export default class RoborockMatterVacuumAccessory {
     };
   }
 
+  /**
+   * Makes the robot match the clean mode Apple Home is displaying, before a
+   * Matter-initiated start.
+   *
+   * This used to run only when the user had just CHANGED the mode — the flag
+   * was set by the ChangeToMode handler and by nothing else. That left the
+   * most ordinary case of all unhandled: the mode Home already shows is
+   * usually the mode the user wants, so they never tap it, so no ChangeToMode
+   * arrives, so nothing was sent and the robot ran in whatever mode it had
+   * been left in. Measured in #8: a "Vacuum" start with no preceding mode
+   * request sent no water command at all and the robot mopped, while the same
+   * start one explicit tap later sent it and vacuumed.
+   *
+   * Starting a clean is a promise that the robot will run in the displayed
+   * mode, so the mode is applied on every start, changed or not. It is
+   * deliberately NOT skipped when the robot looks like it already matches:
+   * the reading such a check would consult is exactly the one that lies — a
+   * docked robot's water-box status read as plain Vacuum for the robot that
+   * then mopped. The settings themselves preserve the user's levels (a
+   * vacuum-family mode keeps the robot's current suction, a mop-family mode
+   * its current water level), so applying pins the clean TYPE and nothing else.
+   */
   private async applyCleanModeBeforeStarting(): Promise<void> {
     const applySettings = this.api.applyMatterCleanModeSettings;
     if (typeof applySettings !== "function") {
@@ -4180,21 +4186,6 @@ export default class RoborockMatterVacuumAccessory {
   }
 
   /**
-   * Apply the live map-position room (B01/Q7: SCMap currentPose ray-cast
-   * against room outlines, refreshed by the Roborock API layer while the
-   * robot is actively cleaning) to the Service Area state.
-   *
-   * currentArea always follows the physically detected room — that is the
-   * honest signal controllers render as "cleaning in <room>". The progress
-   * list only transitions entries that are part of the announced run scope:
-   * the detected room's entry becomes operating, and a previously operating
-   * scoped entry becomes completed once the robot is detected in a DIFFERENT
-   * scoped room — but only if the robot was actually detected inside it at
-   * some point (otherwise it was just the initial first-requested guess and
-   * honestly returns to pending). Stale all-completed lists from a finished
-   * run are never mutated.
-   */
-  /**
    * Ask the API layer to refresh the live room while a cleaning run is
    * active (it throttles and single-flights internally; B01 robots are
    * additionally driven by their own status loop), and clear the cached
@@ -4266,6 +4257,21 @@ export default class RoborockMatterVacuumAccessory {
     }
   }
 
+  /**
+   * Apply the live map-position room (B01/Q7: SCMap currentPose ray-cast
+   * against room outlines, refreshed by the Roborock API layer while the
+   * robot is actively cleaning) to the Service Area state.
+   *
+   * currentArea always follows the physically detected room — that is the
+   * honest signal controllers render as "cleaning in <room>". The progress
+   * list only transitions entries that are part of the announced run scope:
+   * the detected room's entry becomes operating, and a previously operating
+   * scoped entry becomes completed once the robot is detected in a DIFFERENT
+   * scoped room — but only if the robot was actually detected inside it at
+   * some point (otherwise it was just the initial first-requested guess and
+   * honestly returns to pending). Stale all-completed lists from a finished
+   * run are never mutated.
+   */
   private applyLiveServiceAreaRoom(operationalState: number): void {
     if (!this.isServiceAreaEnabled()) {
       return;
@@ -5008,16 +5014,14 @@ export default class RoborockMatterVacuumAccessory {
   }
 
   /**
-   * Separate from fault reporting above on purpose.
-   *
-   * That setting means "a robot that has genuinely halted should say so
-   * instead of showing Ready". An empty clean-water tank is not that: the
-   * robot is docked, charging, and can vacuum all day. Folding the two
-   * together would change what a setting already switched on by other people
-   * does to their tile, which is how 3.3.0 got into trouble.
-   */
-  /**
    * The `operationalError` attribute as a whole, tank and robot alike.
+   *
+   * Separate from fault reporting above on purpose. That setting means "a
+   * robot that has genuinely halted should say so instead of showing Ready".
+   * An empty clean-water tank is not that: the robot is docked, charging, and
+   * can vacuum all day. Folding the two together would change what a setting
+   * already switched on by other people does to their tile, which is how
+   * 3.3.0 got into trouble.
    *
    * The config key still says "Tank" because that is what it gated when it was
    * introduced in 3.12.0 and renaming it would silently re-enable the
