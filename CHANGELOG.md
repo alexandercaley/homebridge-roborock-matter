@@ -2,7 +2,7 @@
 
 ## 3.39.0
 
-**Selecting every room in Apple Home no longer shows the rooms of the last run, a refused schedule write no longer looks like it succeeded, and HomeKit stops warning about names like "Q5 Max+".**
+**Cloud requests now go out the way python-roborock sends them, and my own S8 Pro Ultra answered the map request again after weeks of silence. Selecting every room in Apple Home no longer shows the rooms of the last run, a refused schedule write no longer looks like it succeeded, and HomeKit stops warning about names like "Q5 Max+".**
 
 ### My own mistakes first
 
@@ -24,7 +24,7 @@ HAP-NodeJS 2.2 (Homebridge 2.4.0) warns for every accessory whose name does not 
 
 ### Cloud requests, sent the way python-roborock sends them
 
-2 differences remained on the cloud path of `get_map_v1`, the request some classic robots leave unanswered while python-roborock gets maps from them (my own S8 Pro Ultra is one): QoS 1 instead of 0, and the security nonce in uppercase. Both now match, and the map request is pinned against a payload produced by python-roborock 7.12.0 itself. Whether that is what those robots needed is not known yet.
+2 differences remained on the cloud path of `get_map_v1`, the request some classic robots leave unanswered while python-roborock gets maps from them (my own S8 Pro Ultra is one): QoS 1 instead of 0, and the security nonce in uppercase. Both now match, and the map request is pinned against a payload produced by python-roborock 7.12.0 itself. My own S8 Pro Ultra had left it unanswered for weeks (95 and 225 times in a row in September); on the first clean with the change, live rooms worked: "Køkkenalrum", then "Entre", each within a minute and a half. One clean is not proof.
 
 QoS 1 had a cost of its own: mqtt.js resends an unacknowledged publish after a reconnect, and by default it queues a QoS 0 publish made while disconnected. A publish made while the link is down is now refused at once and its request fails as "cloud unavailable", so a Start or a Dock the plugin had already reported as failed can no longer reach the robot minutes later, and a dropped link is not counted as a robot that did not answer.
 
@@ -42,7 +42,7 @@ About 640 lines that never ran are gone: the object-tree builders left from the 
 
 ### Tests
 
-2,242 tests, 41 more than 3.38.0. Measured against the 3.38.0 sources, file by file: 7 of 9 fail for #24, 2 of 3 for the schedule switch, 3 of 3 for the cloud request, 4 of 4 for shutdown and restart, 1 of 1 for the colliding id, 2 of 8 for the give-up line. The name tests mostly exercise a function 3.38.0 did not have; 2 of 21 fail against its call sites.
+2,251 tests, 50 more than 3.38.0. Measured against the 3.38.0 sources, file by file: 7 of 9 fail for #24, 2 of 3 for the schedule switch, 3 of 3 for the cloud request, 4 of 4 for a publish the link refuses, 4 of 4 for shutdown and restart, 1 of 1 for the colliding id, 2 of 8 for the give-up line. The name tests mostly exercise a function 3.38.0 did not have; 2 of 22 fail against its call sites.
 
 ## 3.38.0
 
