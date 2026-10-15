@@ -1,5 +1,48 @@
 # Changelog
 
+## 3.39.0
+
+**Selecting every room in Apple Home no longer shows the rooms of the last run, a refused schedule write no longer looks like it succeeded, and HomeKit stops warning about names like "Q5 Max+".**
+
+### My own mistakes first
+
+- 3.38.0 said a room selection spanning 2 maps is refused with `InvalidSet`, so the controller keeps its previous selection. It never was. Homebridge 2.4.0 throws a `selectAreas` handler's return value away and then runs matter.js's own `selectAreas`, so matter.js stored the selection, this plugin kept its old one, and the next heartbeat put the old one back. A refusal is now thrown (`ConstraintError`), which stops matter.js from storing anything. Homebridge logs it as a handler error right after the plugin's warning; that line is expected.
+- 3.38.0 still asked for a bug report when a robot's map replies went to another controller and none to this plugin. The endpoint sent and the endpoint checked are the same value, so that only says the robot sent no map reply to this plugin. The line no longer asks for a report. A frame that carries this plugin's endpoint and still cannot be used now names the likely cause: a second Homebridge on the same Roborock account, which shares the endpoint.
+- 3.38.0 reached npm a day late, because the publishing token had expired.
+
+### Selecting every room (#24)
+
+[@Marrand](https://github.com/mathiashornbek/homebridge-roborock-matter/issues/24) could build a selection room by room, but picking all 8 snapped back to the 2 rooms of that morning's clean. Apple Home sends an empty list for "all rooms", which Matter defines as no area restriction, and the plugin accepted it. But progress is persisted, so the morning's 2 finished rooms were still published, and with nothing selected Apple Home showed those. A selection made between runs now starts with empty progress; a run in progress keeps its own. Start with every room selected cleans every room, as before.
+
+### A refused schedule write
+
+HAP stores the requested value once a switch handler returns, over anything the handler wrote while it ran. A schedule write the Roborock cloud refused restored the old state and then returned, so the switch showed the refused state, every other controller was told it had changed, and the next refresh flipped it back without a word. The handler now throws, which keeps the switch where it was and tells Home the write failed. Measured against hap-nodejs itself.
+
+### HomeKit names (#40)
+
+HAP-NodeJS 2.2 (Homebridge 2.4.0) warns for every accessory whose name does not start and end with a letter or number, or carries anything besides letters, numbers, spaces and `' & ! . _ : ; ( ) / , -`. A robot called "Q5 Max+" warned for every switch and sensor, and a Routine called "Saugen+" for its switch. Every HomeKit name now goes through one function: a name HAP accepts is left exactly as it is, `+` reads as "Plus", and other unsupported characters become spaces. Nothing is re-registered, a name you gave a switch in the Home app stays, and Matter names are not affected.
+
+### Cloud requests, sent the way python-roborock sends them
+
+2 differences remained on the cloud path of `get_map_v1`, the request some classic robots leave unanswered while python-roborock gets maps from them (my own S8 Pro Ultra is one): QoS 1 instead of 0, and the security nonce in uppercase. Both now match, and the map request is pinned against a payload produced by python-roborock 7.12.0 itself. Whether that is what those robots needed is not known yet.
+
+QoS 1 had a cost of its own: mqtt.js resends an unacknowledged publish after a reconnect, and by default it queues a QoS 0 publish made while disconnected. A publish made while the link is down is now dropped, so a Start or a Dock the plugin had already reported as failed can no longer reach the robot minutes later.
+
+### Shutdown and restart
+
+- A start that failed after the MQTT client was created was retried with a second client on the same client id, without ending the first one or its 2 timers.
+- A home-data refresh that landed after shutdown started the polling loops again.
+- A B01 map request in flight at shutdown fired its 20-second timer into a stopped adapter.
+- A request refused before sending could delete the pending entry of another request with the same id, which then timed out although its reply arrived.
+
+### Code
+
+About 640 lines that never ran are gone: the object-tree builders left from the ioBroker adapter this library started as, an unused message queue, an unreachable frame builder, duplicated B01 checks and helpers. Comments that had drifted from the code now say what it does. The B01 startup line states the cadence the loop really has: a read every 15 s while a robot works, every 30 s at rest.
+
+### Tests
+
+2,241 tests, 40 more than 3.38.0. Measured against the 3.38.0 sources, file by file: 7 of 9 fail for #24, 2 of 3 for the schedule switch, 3 of 3 for the cloud request, 3 of 3 for shutdown and restart, 1 of 1 for the colliding id, 2 of 8 for the give-up line. The name tests mostly exercise a function 3.38.0 did not have; 2 of 21 fail against its call sites.
+
 ## 3.38.0
 
 **Two log lines that could not tell two causes apart, and one of them was accusing this plugin of a bug that was not there.**
