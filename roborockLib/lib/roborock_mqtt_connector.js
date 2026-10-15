@@ -852,9 +852,19 @@ class roborock_mqtt_connector {
     return endpoint;
   }
 
+  /**
+   * QoS 0, as python-roborock publishes every V1 and B01 request
+   * (`MqttQos.AT_MOST_ONCE`; only A01 appliances need QoS 1, and this plugin
+   * drives no A01 device). QoS 1 was inherited from the ioBroker adapter and
+   * has a cost on a flaky link: mqtt.js keeps every un-acknowledged QoS 1
+   * publish and sends it AGAIN after a reconnect, so a Start or a Dock the
+   * plugin had long given up on (and told Apple Home about) could reach the
+   * robot minutes later. Every request here has its own timeout and its own
+   * answer; a lost publish is reported as a timeout, not replayed.
+   */
   sendMessage(duid, roborockMessage) {
     client.publish(`rr/m/i/${rriot.u}/${mqttUser}/${duid}`, roborockMessage, {
-      qos: 1,
+      qos: 0,
     });
   }
 

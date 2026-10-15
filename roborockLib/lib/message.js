@@ -91,7 +91,8 @@ class message {
       if (!photo) {
         inner.security = {
           endpoint: endpoint,
-          nonce: this.adapter.nonce.toString("hex").toUpperCase(),
+          // Lowercase, as python-roborock's SecurityData.to_dict sends it.
+          nonce: this.adapter.nonce.toString("hex"),
         };
       }
     }
