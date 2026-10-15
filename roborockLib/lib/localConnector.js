@@ -396,9 +396,7 @@ class localConnector {
       return;
     }
 
-    if (this.localClients[duid] === client) {
-      delete this.localClients[duid];
-    }
+    delete this.localClients[duid];
 
     this.forgetNegotiation(duid);
     client.destroy();

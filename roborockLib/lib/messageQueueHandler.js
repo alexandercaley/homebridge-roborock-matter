@@ -504,7 +504,6 @@ class messageQueueHandler {
             lastCommandMethod: method,
             lastTransportReason: "device-offline",
           });
-          this.adapter.pendingRequests.delete(messageID);
           this.adapter.log.debug(
             `Device ${duid} offline. Not sending for method ${method} request!`
           );
@@ -522,7 +521,6 @@ class messageQueueHandler {
               ? "cloud-only-mqtt-unavailable"
               : "mqtt-unavailable",
           });
-          this.adapter.pendingRequests.delete(messageID);
           this.adapter.log.debug(
             `Cloud connection not available. Not sending for method ${method} request!`
           );
@@ -537,7 +535,6 @@ class messageQueueHandler {
             lastCommandMethod: method,
             lastTransportReason: "local-socket-unavailable",
           });
-          this.adapter.pendingRequests.delete(messageID);
           this.adapter.log.debug(
             `Adapter not connect locally to robot ${duid}. Not sending for method ${method} request!`
           );

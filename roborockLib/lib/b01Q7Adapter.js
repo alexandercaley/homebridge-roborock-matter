@@ -1261,4 +1261,5 @@ module.exports = {
   // Exported for b01Q10Adapter, so the Q10 suction table has one home rather
   // than a second copy that can drift from this one.
   v1FanPowerToWind,
+  normalizeSegmentIds,
 };

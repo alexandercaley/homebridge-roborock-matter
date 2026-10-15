@@ -124,14 +124,6 @@ export default class RoborockActionSwitchAccessory {
     this.configureAccessory();
   }
 
-  get action(): HomeKitActionKey {
-    return this.definition.key;
-  }
-
-  get summary(): string {
-    return this.definition.summary;
-  }
-
   /**
    * Re-apply the identity and re-bind the handlers.
    *

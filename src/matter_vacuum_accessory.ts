@@ -288,6 +288,11 @@ const MAX_PLUS_FAN_POWER_CLEAN_MODE: (typeof FAN_POWER_CLEAN_MODES)[number] = {
   extraTags: [RVC_CLEAN_MODE_TAG_DEEP_CLEAN],
 };
 
+const ALL_FAN_POWER_CLEAN_MODES = [
+  ...FAN_POWER_CLEAN_MODES,
+  MAX_PLUS_FAN_POWER_CLEAN_MODE,
+];
+
 const RVC_RUN_MODE_TAG_IDLE = 16384;
 const RVC_RUN_MODE_TAG_CLEANING = 16385;
 const RVC_CLEAN_MODE_TAG_VACUUM = 16385;
@@ -873,6 +878,14 @@ const PAUSED_STATE = 10;
 // matter.js suppresses no-op writes, so this generates no Matter traffic
 // unless the store actually drifted from the latest Roborock state.
 const MATTER_STATE_HEARTBEAT_INTERVAL_MS = 60 * 1000;
+
+/** The optimistic overlay a start, area clean or resume lays over the tile. */
+function cleaningOptimisticState(): MatterClusterState {
+  return {
+    rvcRunMode: { currentMode: RUN_MODE_CLEANING },
+    rvcOperationalState: { operationalState: RVC_OPERATIONAL_STATE.RUNNING },
+  };
+}
 
 /**
  * Optional Homebridge 2 Matter exposure for Apple Home's native vacuum UI.
@@ -1840,7 +1853,8 @@ export default class RoborockMatterVacuumAccessory {
     // says what happened. The resolver's own text is re-read here rather than
     // threaded through the cluster, because the cluster carries only what
     // Matter defines.
-    const faultDetail = this.getMatterFault()?.text ?? "";
+    const matterFault = this.getMatterFault();
+    const faultDetail = matterFault?.text ?? "";
     // The phase, named rather than numbered, and only when there is one.
     //
     // This field is here because the feature it reports is UNMEASURED: nobody
@@ -1865,15 +1879,14 @@ export default class RoborockMatterVacuumAccessory {
     // A fault the robot has but the tile is not shown, because the robot is
     // working (see OPERATIONAL_STATES_THAT_CARRY_A_FAULT). Said in the line so
     // a log reader can tell "held back" from "never noticed".
-    const heldBackFault = this.getMatterFault();
     const heldBackText =
       faultText === "" &&
       typeof opState?.operationalState === "number" &&
       !this.canCarryAFault(opState.operationalState) &&
-      heldBackFault !== null &&
-      heldBackFault.id !== RVC_OPERATIONAL_ERROR.NO_ERROR &&
+      matterFault !== null &&
+      matterFault.id !== RVC_OPERATIONAL_ERROR.NO_ERROR &&
       this.isFaultAttributeEnabled()
-        ? `, fault=${heldBackFault.id} held back while the robot works`
+        ? `, fault=${matterFault.id} held back while the robot works`
         : "";
 
     return `Matter publish for ${this.getVacuumName()}: battery=${typeof halfPercent === "number" ? halfPercent / 2 + "%" : "n/a"}, operationalState=${opState?.operationalState ?? "n/a"}, runMode=${runMode?.currentMode ?? "n/a"}, cleanMode=${cleanMode?.currentMode ?? "n/a"}${phaseText}${faultText}${heldBackText}.`;
@@ -2074,12 +2087,7 @@ export default class RoborockMatterVacuumAccessory {
       this.platform.log.info(
         `Starting ${name} from ${surfacePhrase(surface)} for selected service area(s): ${selectedAreaNames.join(", ")}.`
       );
-      const state = {
-        rvcRunMode: { currentMode: RUN_MODE_CLEANING },
-        rvcOperationalState: {
-          operationalState: RVC_OPERATIONAL_STATE.RUNNING,
-        },
-      };
+      const state = cleaningOptimisticState();
       this.beginServiceAreaProgress(areasToClean.map((area) => area.areaId));
       this.setAndScheduleOptimisticState(state, "selected-area start");
       this.dispatchRoborockMatterCommand(
@@ -2099,12 +2107,7 @@ export default class RoborockMatterVacuumAccessory {
     }
 
     this.platform.log.info(`Starting ${name} from ${surfacePhrase(surface)}.`);
-    const state = {
-      rvcRunMode: { currentMode: RUN_MODE_CLEANING },
-      rvcOperationalState: {
-        operationalState: RVC_OPERATIONAL_STATE.RUNNING,
-      },
-    };
+    const state = cleaningOptimisticState();
     this.beginFullCleanServiceAreaProgress();
     this.setAndScheduleOptimisticState(state, "start");
     this.dispatchRoborockMatterCommand(
@@ -2223,23 +2226,6 @@ export default class RoborockMatterVacuumAccessory {
   }
 
   /**
-   * Whether the run this robot is paused in was aimed at specific rooms.
-   *
-   * `state` cannot answer this. A paused robot reports 10 (paused) and the
-   * clean type is simply gone from it — which is the whole reason Roborock
-   * carries `in_cleaning` as well: 0 for a whole-home run, non-zero when the
-   * robot was sent at selected areas. It survives the pause.
-   *
-   * Read from the robot rather than remembered here, deliberately. A flag set
-   * when Matter started the run would be wrong for a room clean started in
-   * the Roborock app, wrong after a Homebridge restart, and wrong the first
-   * time someone paused from a third surface — and being wrong in this
-   * particular place means sending a resume verb into a full clean.
-   *
-   * An absent or unreadable value is treated as a full clean, which is what
-   * every release before this one assumed for every robot.
-   */
-  /**
    * Which verb continues the clean the robot has paused, read from its own
    * `in_cleaning` (python-roborock `RoborockInCleaning`):
    *
@@ -2255,6 +2241,15 @@ export default class RoborockMatterVacuumAccessory {
    * room clean carries 3 (`roborockAPI.test.js`), which is the one value
    * that verb belongs to. Home Assistant's Roborock integration makes the
    * same three-way choice.
+   *
+   * `state` cannot answer this: a paused robot reports 10 and the clean type
+   * is gone from it, while `in_cleaning` survives the pause. Read from the
+   * robot rather than remembered here, deliberately. A flag set when Matter
+   * started the run would be wrong for a room clean started in the Roborock
+   * app, wrong after a Homebridge restart, and wrong the first time someone
+   * paused from a third surface — and being wrong in this particular place
+   * means sending a resume verb into a full clean. An absent or unreadable
+   * value is treated as a full clean.
    */
   private getResumeVerb():
     | "app_start"
@@ -2297,12 +2292,7 @@ export default class RoborockMatterVacuumAccessory {
     this.platform.log.debug(
       `Resume for ${this.getVacuumName()}: in_cleaning=${this.getNumberStatus("in_cleaning") ?? "unknown"}, sending ${verb}.`
     );
-    const state = {
-      rvcRunMode: { currentMode: RUN_MODE_CLEANING },
-      rvcOperationalState: {
-        operationalState: RVC_OPERATIONAL_STATE.RUNNING,
-      },
-    };
+    const state = cleaningOptimisticState();
     this.setAndScheduleOptimisticState(state, "resume");
     this.dispatchRoborockMatterCommand("resume", async () => {
       await this.applyCleanModeBeforeStarting();
@@ -2390,17 +2380,14 @@ export default class RoborockMatterVacuumAccessory {
 
   private scheduleMatterStateUpdate(
     reason: string,
-    optimisticGeneration?: number
+    optimisticGeneration: number
   ): void {
     if (!this.registered) {
       return;
     }
 
     const timer = scheduleTimer(() => {
-      if (
-        optimisticGeneration !== undefined &&
-        optimisticGeneration !== this.optimisticGeneration
-      ) {
+      if (optimisticGeneration !== this.optimisticGeneration) {
         this.platform.log.debug(
           `Skipping stale Matter optimistic state update after ${reason} for ${this.getVacuumName()}.`
         );
@@ -3027,10 +3014,7 @@ export default class RoborockMatterVacuumAccessory {
 
     // Live map-position room tracking: reflect the physically detected room
     // in currentArea/progress before the snapshot below is built.
-    const liveOperationalState = this.getOperationalState(
-      this.getNumberStatus("state"),
-      this.getNumberStatus("charge_status")
-    );
+    const liveOperationalState = this.getOperationalState();
     this.applyLiveServiceAreaRoom(liveOperationalState);
     this.driveLiveRoomTracking(liveOperationalState);
 
@@ -3049,8 +3033,12 @@ export default class RoborockMatterVacuumAccessory {
       rvcOperationalState: this.buildOperationalStateCluster(),
     };
 
-    this.addCleanModeCluster(clusters);
-    this.addPowerSourceCluster(clusters);
+    if (this.isCleanModeEnabled()) {
+      clusters.rvcCleanMode = this.buildCleanModeCluster();
+    }
+    if (this.isPowerSourceEnabled()) {
+      clusters.powerSource = this.buildPowerSourceCluster();
+    }
 
     if (this.isServiceAreaEnabled() && this.hasServiceAreasToExpose()) {
       // Publishing a Service Area cluster with an empty supportedAreas list
@@ -3255,7 +3243,7 @@ export default class RoborockMatterVacuumAccessory {
     ) {
       const powerModes =
         capabilities.canMaxPlusFanPower === true
-          ? [...FAN_POWER_CLEAN_MODES, MAX_PLUS_FAN_POWER_CLEAN_MODE]
+          ? ALL_FAN_POWER_CLEAN_MODES
           : FAN_POWER_CLEAN_MODES;
       for (const powerMode of powerModes) {
         supportedModes.push({
@@ -3279,12 +3267,10 @@ export default class RoborockMatterVacuumAccessory {
   private getFanPowerCleanMode(
     cleanMode: number
   ): (typeof FAN_POWER_CLEAN_MODES)[number] | null {
-    if (cleanMode === MAX_PLUS_FAN_POWER_CLEAN_MODE.mode) {
-      return MAX_PLUS_FAN_POWER_CLEAN_MODE;
-    }
     return (
-      FAN_POWER_CLEAN_MODES.find((powerMode) => powerMode.mode === cleanMode) ??
-      null
+      ALL_FAN_POWER_CLEAN_MODES.find(
+        (powerMode) => powerMode.mode === cleanMode
+      ) ?? null
     );
   }
 
@@ -3325,7 +3311,8 @@ export default class RoborockMatterVacuumAccessory {
     // signature and the active water-flow setting. A pending Matter
     // selection wins until it has been applied, and outside an active run
     // the (sticky) robot-side setting must not shadow the user's selection.
-    const inCleaningRun = this.isInCleaningRunMode(this.getOperationalState());
+    const operationalState = this.getOperationalState();
+    const inCleaningRun = this.isInCleaningRunMode(operationalState);
 
     if (this.selectedCleanModeLiveConfirmationExpiresAt > 0) {
       if (!inCleaningRun) {
@@ -3376,7 +3363,6 @@ export default class RoborockMatterVacuumAccessory {
     // actually running or paused IS the wind-down: driving home, emptying the
     // bin, washing the mop, updating the map. During those the fan power and
     // water box belong to the dock's business, not to what the user asked for.
-    const operationalState = this.getOperationalState();
     const windingDown =
       inCleaningRun &&
       operationalState !== RVC_OPERATIONAL_STATE.RUNNING &&
@@ -3415,12 +3401,9 @@ export default class RoborockMatterVacuumAccessory {
     ) {
       const liveFanPower = this.getNumberStatus("fan_power");
       if (liveFanPower !== null) {
-        const liveMode =
-          liveFanPower === MAX_PLUS_FAN_POWER_CLEAN_MODE.fanPower
-            ? MAX_PLUS_FAN_POWER_CLEAN_MODE
-            : FAN_POWER_CLEAN_MODES.find(
-                (powerMode) => powerMode.fanPower === liveFanPower
-              );
+        const liveMode = ALL_FAN_POWER_CLEAN_MODES.find(
+          (powerMode) => powerMode.fanPower === liveFanPower
+        );
         if (liveMode && this.isSupportedCleanMode(liveMode.mode)) {
           this.lastResolvedFanPowerCleanMode = liveMode.mode;
           return liveMode.mode;
@@ -3574,20 +3557,15 @@ export default class RoborockMatterVacuumAccessory {
   }
 
   private getMatterCleanModeCapabilities(): MatterCleanModeCapabilities {
-    const getCapabilities = this.api.getMatterCleanModeCapabilities;
-
-    if (typeof getCapabilities !== "function") {
-      return { canVacuum: true, canMop: false };
-    }
-
-    // Guard against older/patched API builds returning undefined so cluster
-    // builds (which run inside Matter attribute reads) can never throw.
-    const capabilities = getCapabilities.call(this.api, this.getDuid()) as
-      | MatterCleanModeCapabilities
-      | null
-      | undefined;
-
-    return capabilities ?? { canVacuum: true, canMop: false };
+    // Guard against older/patched API builds lacking the method or returning
+    // undefined so cluster builds (which run inside Matter attribute reads)
+    // can never throw.
+    return (
+      this.api.getMatterCleanModeCapabilities?.(this.getDuid()) ?? {
+        canVacuum: true,
+        canMop: false,
+      }
+    );
   }
 
   /**
@@ -3990,21 +3968,10 @@ export default class RoborockMatterVacuumAccessory {
     return cluster;
   }
 
-  private buildPowerSourceCluster(
-    batteryValue?: number,
-    chargeStatusValue?: number | null,
-    stateValue?: number | null
-  ): Record<string, unknown> {
-    const battery =
-      batteryValue === undefined
-        ? this.getNumberStatus("battery")
-        : batteryValue;
-    const chargeStatus =
-      chargeStatusValue === undefined
-        ? this.getNumberStatus("charge_status")
-        : chargeStatusValue;
-    const state =
-      stateValue === undefined ? this.getNumberStatus("state") : stateValue;
+  private buildPowerSourceCluster(): Record<string, unknown> {
+    const battery = this.getNumberStatus("battery");
+    const chargeStatus = this.getNumberStatus("charge_status");
+    const state = this.getNumberStatus("state");
     const normalizedBattery =
       battery === null ? null : Math.max(0, Math.min(100, battery));
     const batChargeState = this.getBatteryChargeState(
@@ -4034,31 +4001,6 @@ export default class RoborockMatterVacuumAccessory {
       ),
       batChargingCurrent: null,
     };
-  }
-
-  private addPowerSourceCluster(
-    clusters: MatterClusterState,
-    batteryValue?: number,
-    chargeStatusValue?: number | null,
-    stateValue?: number | null
-  ): void {
-    if (!this.isPowerSourceEnabled()) {
-      return;
-    }
-
-    clusters.powerSource = this.buildPowerSourceCluster(
-      batteryValue,
-      chargeStatusValue,
-      stateValue
-    );
-  }
-
-  private addCleanModeCluster(clusters: MatterClusterState): void {
-    if (!this.isCleanModeEnabled()) {
-      return;
-    }
-
-    clusters.rvcCleanMode = this.buildCleanModeCluster();
   }
 
   private hasServiceAreasToExpose(): boolean {
@@ -4103,11 +4045,7 @@ export default class RoborockMatterVacuumAccessory {
     // We know which rooms were requested; until live map-position tracking
     // reports which one the robot is actually inside, the first requested
     // area is shown as operating and the rest as pending.
-    this.liveConfirmedServiceAreaIds = new Set();
-    this.liveRoomVisitAreaId = null;
-    this.liveRoomVisitReadings = 0;
-    this.liveRoomVisitFirstSeenAt = null;
-    this.liveRoomVisitLastSeenAt = null;
+    this.resetLiveRoomVisits();
     this.serviceAreaCurrentArea = areaIds[0];
     this.serviceAreaProgress = areaIds.map((areaId, index) => ({
       areaId,
@@ -4155,11 +4093,7 @@ export default class RoborockMatterVacuumAccessory {
       this.clearServiceAreaProgress();
       return;
     }
-    this.liveConfirmedServiceAreaIds = new Set();
-    this.liveRoomVisitAreaId = null;
-    this.liveRoomVisitReadings = 0;
-    this.liveRoomVisitFirstSeenAt = null;
-    this.liveRoomVisitLastSeenAt = null;
+    this.resetLiveRoomVisits();
     this.serviceAreaCurrentArea = null;
     this.serviceAreaProgress = areaIds.map((areaId) => ({
       areaId,
@@ -4218,12 +4152,17 @@ export default class RoborockMatterVacuumAccessory {
     this.beginFullCleanServiceAreaProgress();
   }
 
-  private clearServiceAreaProgress(): void {
+  /** Every run boundary starts live-room confirmation from nothing. */
+  private resetLiveRoomVisits(): void {
     this.liveConfirmedServiceAreaIds = new Set();
     this.liveRoomVisitAreaId = null;
     this.liveRoomVisitReadings = 0;
     this.liveRoomVisitFirstSeenAt = null;
     this.liveRoomVisitLastSeenAt = null;
+  }
+
+  private clearServiceAreaProgress(): void {
+    this.resetLiveRoomVisits();
     this.serviceAreaCurrentArea = null;
     this.serviceAreaProgress = [];
     this.persistServiceAreaProgress();
@@ -4238,11 +4177,7 @@ export default class RoborockMatterVacuumAccessory {
     }
     // The run ended (docked, charging, stopped): everything requested is
     // reported as completed and no area is current anymore.
-    this.liveConfirmedServiceAreaIds = new Set();
-    this.liveRoomVisitAreaId = null;
-    this.liveRoomVisitReadings = 0;
-    this.liveRoomVisitFirstSeenAt = null;
-    this.liveRoomVisitLastSeenAt = null;
+    this.resetLiveRoomVisits();
     this.serviceAreaCurrentArea = null;
     this.serviceAreaProgress = this.serviceAreaProgress.map((entry) => ({
       areaId: entry.areaId,
@@ -4668,12 +4603,8 @@ export default class RoborockMatterVacuumAccessory {
     // Matter controllers can hang if supportedMaps advertises maps with no
     // matching supportedAreas, or if supportedAreas reference a mapId that has
     // no supportedMaps entry. Build supportedMaps from exactly the maps that
-    // have areas, preferring Roborock-reported map names and falling back to
-    // the area's map name or a generated label.
-    const roborockMapsById = new Map(
-      this.getMatterServiceAreaMapsFromRoborock().map((map) => [map.mapId, map])
-    );
-
+    // have areas, named by the Roborock map name each area already carries
+    // (see getMatterServiceAreas) or a generated label.
     const maps: MatterServiceAreaMap[] = [];
     const seenMapIds = new Set<number>();
     // matter.js 0.17.9 refuses two maps with the same name exactly as it
@@ -4687,10 +4618,7 @@ export default class RoborockMatterVacuumAccessory {
       }
 
       seenMapIds.add(area.mapId);
-      const base =
-        roborockMapsById.get(area.mapId)?.name ||
-        area.mapName ||
-        `Roborock Map ${area.mapId}`;
+      const base = area.mapName || `Roborock Map ${area.mapId}`;
       let name = base;
       for (let n = 2; usedNames.has(name); n += 1) {
         const suffix = ` ${n}`;
@@ -5725,7 +5653,7 @@ export default class RoborockMatterVacuumAccessory {
 
   private scheduleReturnToDockRetry(
     command: () => Promise<void>,
-    surface: string = MATTER_SURFACE
+    surface: string
   ): void {
     if (this.returnToDockRetryPending) {
       return;
@@ -5905,7 +5833,7 @@ export default class RoborockMatterVacuumAccessory {
   private logMatterCommandDuration(
     action: string,
     startedAt: number,
-    surface: string = MATTER_SURFACE
+    surface: string
   ): void {
     const durationMs = Date.now() - startedAt;
     const transport = this.getTransportDescription();

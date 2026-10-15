@@ -1264,28 +1264,6 @@ export default class RoborockHapScheduleAccessory {
     return { ok: true, schedules, reason: undefined };
   }
 
-  recordScheduleUpdate(schedule: RoborockSchedule): void {
-    const updated = {
-      ...schedule,
-      timer: [...schedule.timer],
-    };
-
-    const schedules = this.cachedSchedules
-      ? this.cachedSchedules.map((candidate) =>
-          candidate.id === updated.id
-            ? { ...updated }
-            : { ...candidate, timer: [...candidate.timer] }
-        )
-      : [updated];
-
-    if (!schedules.some((candidate) => candidate.id === updated.id)) {
-      schedules.push(updated);
-    }
-
-    this.cachedSchedules = schedules;
-    this.lastScheduleRefreshAt = Date.now();
-  }
-
   enqueueScheduleWrite(scheduleId: string, enabled: boolean): Promise<boolean> {
     return this.writeBatcher.enqueue({ scheduleId, enabled });
   }
@@ -1853,15 +1831,6 @@ export default class RoborockHapScheduleAccessory {
 
       this.scheduleAccessories.delete(id);
       this.platform.api.updatePlatformAccessories([this.managerAccessory]);
-    }
-  }
-
-  private removeFromPlatformCache(accessory: PlatformAccessory): void {
-    const cachedAccessories = ((this.platform as any).accessories ??
-      []) as PlatformAccessory[];
-    const index = cachedAccessories.indexOf(accessory);
-    if (index >= 0) {
-      cachedAccessories.splice(index, 1);
     }
   }
 }

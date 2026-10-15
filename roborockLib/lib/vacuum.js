@@ -796,43 +796,8 @@ class vacuum {
 
                 if (isCleaning) {
                   this.adapter.startMapUpdater(duid);
-                } else if (!isCleaning) {
-                  this.adapter.stopMapUpdater(duid);
                 } else {
-                  const mapCount = await this.adapter.getStateAsync(
-                    `Devices.${duid}.floors.multi_map_count`
-                  );
-
-                  // don't process load_multi_map for single level configuration
-                  if (mapCount) {
-                    // sometimes mapCount is not available shortly after first start of adapter
-                    if (mapCount.val > 1) {
-                      const currentMap = deviceStatus[0][attribute];
-                      const mapFromCommand = await this.adapter.getState(
-                        `Devices.${duid}.commands.load_multi_map`
-                      );
-
-                      if (mapFromCommand && mapFromCommand.val != currentMap) {
-                        await this.adapter.setStateAsync(
-                          `Devices.${duid}.commands.load_multi_map`,
-                          currentMap,
-                          true
-                        );
-                      }
-                    }
-                  }
-                }
-
-                break;
-              }
-              case "state": {
-                if (this.adapter.socket) {
-                  const sendValue = {
-                    duid: duid,
-                    command: "get_status",
-                    parameters: { isCleaning: isCleaning },
-                  };
-                  this.adapter.socket.send(JSON.stringify(sendValue));
+                  this.adapter.stopMapUpdater(duid);
                 }
 
                 break;
@@ -1154,19 +1119,6 @@ class vacuum {
                 duid,
                 this.robotModel
               );
-
-              if (
-                this.adapter.supportsFeature &&
-                this.adapter.supportsFeature("PLUGINS")
-              ) {
-                if (this.adapter.sentryInstance) {
-                  this.adapter.sentryInstance
-                    .getSentryObject()
-                    .captureException(
-                      `Failed to extract gzip: ${JSON.stringify(error)}`
-                    );
-                }
-              }
             } else {
               const extractedPhoto = this.extractPhoto(photoData);
 
@@ -1273,31 +1225,6 @@ class vacuum {
       clearWaterBoxStatus: (dss >> 2) & 0b11,
       isUpdownWaterReady: dss & 0b11,
     };
-  }
-
-  calculateCleaningValue(attribute, value) {
-    switch (attribute) {
-      case "clean_time":
-        return Math.round(value / 60 / 60);
-      case "clean_area":
-        return Math.round(value / 1000 / 1000);
-      default:
-        return value;
-    }
-  }
-
-  calculateRecordValue(attribute, value) {
-    switch (attribute) {
-      case "begin":
-      case "end":
-        return new Date(value * 1000).toString();
-      case "duration":
-        return Math.round(value / 60);
-      case "area":
-        return Math.round(value / 1000 / 1000);
-      default:
-        return value;
-    }
   }
 
   unzipBuffer(buffer, callback) {

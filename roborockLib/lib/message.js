@@ -150,28 +150,6 @@ class message {
     const currentSeq = seq & 0xffffffff;
     const currentRandom = random & 0xffffffff;
 
-    if (protocol == 1) {
-      const msg = Buffer.alloc(23);
-      // latin1, not the UTF-8 default: the protocol version is three raw
-      // bytes, and one of the versions this file handles explicitly is
-      // "\x81S\x19". UTF-8 encodes 0x81 as two bytes (c2 81), so write()
-      // returned 4 and produced `c2 81 53 19`; the writeUint32BE below then
-      // overwrote the fourth byte, leaving a corrupt version AND a wrong
-      // sequence number. _decodeMsg already reads it back with latin1.
-      msg.write(version, "latin1");
-      msg.writeUint32BE(currentSeq, 3);
-      msg.writeUint32BE(currentRandom, 7);
-      msg.writeUint32BE(timestamp, 11);
-      msg.writeUint16BE(protocol, 15);
-      msg.writeUint16BE(0, 17);
-      const crc32 = CRC32.buf(msg.subarray(0, msg.length - 4)) >>> 0;
-      msg.writeUint32BE(crc32, msg.length - 4);
-      seq++;
-      random++;
-
-      return msg;
-    }
-
     if (version == "1.0") {
       const localKey =
         this.adapter.localKeys instanceof Map

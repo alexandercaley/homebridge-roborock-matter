@@ -98,25 +98,6 @@ const MATTER_TO_Q10_CLEAN_TYPE = { 0: 2, 1: 3, 2: 1 };
 const Q10_CLEAN_TYPE_TO_MATTER = { 1: 2, 2: 0, 3: 1 };
 
 /**
- * Segment ids out of the several shapes callers use, matching the Q7
- * adapter's own normalisation so the two families accept the same inputs.
- * @param {any} params
- * @returns {number[]}
- */
-function normalizeSegmentIds(params) {
-  if (Array.isArray(params)) {
-    if (params.length === 1 && params[0] && Array.isArray(params[0].segments)) {
-      return params[0].segments.map(Number);
-    }
-    return params.map(Number).filter((value) => Number.isFinite(value));
-  }
-  if (params && Array.isArray(params.segments)) {
-    return params.segments.map(Number);
-  }
-  return [];
-}
-
-/**
  * Translate a v1-shaped outgoing command to a Q10 datapoint write.
  *
  * Returns `{dp, params}` for a command the dialect can express, or `null` for
@@ -145,7 +126,7 @@ function translateOutgoing(method, params) {
       };
     case "app_segment_clean":
     case "app_segment_clean_by_ids": {
-      const roomIds = normalizeSegmentIds(params);
+      const roomIds = b01Q7Adapter.normalizeSegmentIds(params);
       if (!roomIds.length) {
         return null;
       }
@@ -199,20 +180,6 @@ function buildDps(dp, params) {
   return {
     [String(dp)]: params !== undefined && params !== null ? params : {},
   };
-}
-
-/**
- * True when the Q10 dialect can express this v1 method at all.
- * @param {string} method
- * @param {any} [params]
- * @returns {boolean}
- */
-function canSendV1Method(method, params) {
-  try {
-    return Boolean(translateOutgoing(method, params ?? []));
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -277,5 +244,4 @@ module.exports = {
   Q10_CLEAN_TYPE_TO_MATTER,
   translateOutgoing,
   buildDps,
-  canSendV1Method,
 };

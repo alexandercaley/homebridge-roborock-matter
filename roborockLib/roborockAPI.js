@@ -413,15 +413,6 @@ const PERSISTED_STATE_IDS = new Set([
   "MqttSessionDiagnostics",
 ]);
 
-const dockingStationStates = [
-  "cleanFluidStatus",
-  "waterBoxFilterStatus",
-  "dustBagStatus",
-  "dirtyWaterBoxStatus",
-  "clearWaterBoxStatus",
-  "isUpdownWaterReady",
-];
-
 // Commands that are forwarded to vacuums[duid].command() as-is, without any
 // command-specific handling in startCommand.
 const SIMPLE_VACUUM_COMMANDS = new Set([
@@ -494,13 +485,11 @@ class Roborock {
     this.initializedVacuumDuids = new Set();
     this.socket = null;
 
-    this.objects = {};
     this.states = {};
     this.roomMappings = this.getPersistedRoomMappings();
 
     this.idCounter = 0;
     this.nonce = crypto.randomBytes(16);
-    this.messageQueue = new Map();
 
     this.localConnector = new rrLocalConnector(this);
     this.rr_mqtt_connector = new roborock_mqtt_connector(this);
@@ -1021,25 +1010,15 @@ class Roborock {
   }
 
   getManagedHomeDevices(homedata, ignoredSet = this.getIgnoredDeviceSet()) {
-    return this.getAllHomeDevices(homedata).filter((device) => {
-      return (
-        device && device.duid && !this.shouldSkipDevice(device, ignoredSet)
-      );
-    });
+    return this.getAllHomeDevices(homedata).filter(
+      (device) => device && device.duid
+    );
   }
 
   getLocalKeyDevices(homedata, ignoredSet = this.getIgnoredDeviceSet()) {
-    return this.getManagedHomeDevices(homedata, ignoredSet).filter((device) => {
-      if (!device || !device.duid || !device.localKey) {
-        return false;
-      }
-
-      if (device.sn && ignoredSet.has(device.sn)) {
-        return false;
-      }
-
-      return true;
-    });
+    return this.getManagedHomeDevices(homedata, ignoredSet).filter(
+      (device) => device.localKey
+    );
   }
 
   async refreshLocalKeysFromHomeData(
@@ -1884,7 +1863,6 @@ class Roborock {
       clientID,
       language: this.language,
     });
-    await this.setStateAsync("info.connection", { val: true, ack: true });
     // api/v1/getUrlByEmail(email = ...)
 
     // A failed login must NEVER escape as an unhandled rejection: wrong
@@ -1897,7 +1875,6 @@ class Roborock {
       userdata = await this.getUserData(this.loginApi);
     } catch (error) {
       const message = error?.message || String(error);
-      await this.setStateAsync("info.connection", { val: false, ack: true });
 
       const isCredentialError =
         /"code":\s*(2012|2008|2018)/.test(message) ||
@@ -1935,9 +1912,6 @@ class Roborock {
             );
           });
         }, delayMs);
-        if (typeof retryTimer?.unref === "function") {
-          retryTimer.unref();
-        }
         this.loginRetryTimer = retryTimer;
       } else {
         this.log.error(
@@ -1950,7 +1924,6 @@ class Roborock {
       this.log.error(
         "Login failed or requires 2FA. Please complete authentication in the Config UI."
       );
-      await this.setStateAsync("info.connection", { val: false, ack: true });
       return;
     }
     this._startupLoginAttempts = 0;
@@ -2639,22 +2612,7 @@ class Roborock {
       // starter functions themselves, so clearInterval() calls were no-ops
       // and the "restart when missing" check could never fire — one offline
       // flap killed polling forever.
-      this.vacuums[duid].mainUpdateInterval = () => {
-        this.clearInterval(this.vacuums[duid].mainUpdateIntervalHandle);
-        this.vacuums[duid].mainUpdateIntervalHandle = this.setInterval(
-          this.updateDataMinimumData.bind(this),
-          this.updateInterval * 1000,
-          duid,
-          this.vacuums[duid],
-          robotModel
-        );
-        return this.vacuums[duid].mainUpdateIntervalHandle;
-      };
-
-      if (device.online) {
-        this.log.debug(`${duid} online. Starting mainUpdateInterval.`);
-        this.vacuums[duid].mainUpdateInterval(); // actually start mainUpdateInterval()
-      }
+      this.startMainUpdateInterval(duid, device.online);
 
       this.vacuums[duid].getStatusIntervall = () => {
         // B01/Q7 status is owned by the dedicated 15s loop; the per-device
@@ -2666,9 +2624,7 @@ class Roborock {
         this.vacuums[duid].getStatusIntervalHandle = this.setInterval(
           this.getStatus.bind(this),
           CLASSIC_STATUS_TICK_MS,
-          duid,
-          this.vacuums[duid],
-          robotModel
+          duid
         );
         return this.vacuums[duid].getStatusIntervalHandle;
       };
@@ -2996,9 +2952,7 @@ class Roborock {
     // vacuum+mop via the `mode` property), so apply the Matter selection
     // directly. The v1-style workarounds (fan power OFF to fake mop-only,
     // water box modes) do not apply — Q7 water is a manual tank.
-    if (
-      this.getVacuumDeviceInfo(duid, "pv") === b01Q7Adapter.B01_PROTOCOL_VERSION
-    ) {
+    if (this.isB01Device(duid)) {
       // These used to go through startCommand(), whose SIMPLE_VACUUM_COMMANDS
       // allow-list contains neither `set_clean_type` nor `set_custom_mode` —
       // so both fell through to `Command ... not found.` and nothing was ever
@@ -4007,10 +3961,7 @@ class Roborock {
   }
 
   async refreshMatterServiceAreaRoomMappings(duid, vacuum) {
-    if (
-      !this.config.enableMatterServiceArea &&
-      !this.config.enableMatterServiceAreaBeta
-    ) {
+    if (!this.config.enableMatterServiceArea) {
       return false;
     }
 
@@ -4275,9 +4226,6 @@ class Roborock {
     if (this.homedataInterval) {
       this.clearInterval(this.homedataInterval);
     }
-    if (this.commandTimeout) {
-      this.clearTimeout(this.commandTimeout);
-    }
 
     this.localConnector.clearLocalDevicedTimeout();
 
@@ -4296,33 +4244,6 @@ class Roborock {
       this.clearInterval(this.b01StatusLoopHandle);
       this.b01StatusLoopHandle = null;
     }
-
-    this.messageQueue.forEach(({ timeout102, timeout301 }) => {
-      this.clearTimeout(timeout102);
-      if (timeout301) {
-        this.clearTimeout(timeout301);
-      }
-    });
-
-    // Clear the messageQueue map
-    this.messageQueue.clear();
-
-    if (this.webSocketInterval) {
-      this.clearInterval(this.webSocketInterval);
-    }
-  }
-
-  checkAndClearRequest(requestId) {
-    const request = this.messageQueue.get(requestId);
-    if (!request?.timeout102 && !request?.timeout301) {
-      this.messageQueue.delete(requestId);
-      // this.log.debug(`Cleared messageQueue`);
-    } else {
-      this.log.debug(
-        `Not clearing messageQueue. ${request.timeout102}  - ${request.timeout301}`
-      );
-    }
-    this.log.debug(`Length of message queue: ${this.messageQueue.size}`);
   }
 
   /**
@@ -4354,9 +4275,6 @@ class Roborock {
             ack: true,
           });
           this.log.debug(`homedata successfully updated`);
-
-          await this.updateDeviceInfo(homedata.devices);
-          await this.updateDeviceInfo(homedata.receivedDevices);
         } else {
           this.log.warn("homedata failed to download");
         }
@@ -4366,312 +4284,19 @@ class Roborock {
     }
   }
 
-  async updateDeviceInfo(devices) {
-    devices = this.normalizeArray(devices);
-    for (const device in devices) {
-      const duid = devices[device].duid;
-
-      for (const deviceAttribute in devices[device]) {
-        if (typeof devices[device][deviceAttribute] != "object") {
-          let unit;
-          if (deviceAttribute == "activeTime") {
-            unit = "h";
-            devices[device][deviceAttribute] = Math.round(
-              devices[device][deviceAttribute] / 1000 / 60 / 60
-            );
-          }
-          await this.setObjectAsync(
-            "Devices." + duid + ".deviceInfo." + deviceAttribute,
-            {
-              type: "state",
-              common: {
-                name: deviceAttribute,
-                type: this.getType(devices[device][deviceAttribute]),
-                unit: unit,
-                role: "value",
-                read: true,
-                write: false,
-              },
-              native: {},
-            }
-          );
-          this.setStateChangedAsync(
-            "Devices." + duid + ".deviceInfo." + deviceAttribute,
-            { val: devices[device][deviceAttribute], ack: true }
-          );
-        }
-      }
-    }
-  }
-
-  getType(attribute) {
-    // Get the type of the attribute.
-    const type = typeof attribute;
-
-    // Return the appropriate string representation of the type.
-    switch (type) {
-      case "boolean":
-        return "boolean";
-      case "number":
-        return "number";
-      default:
-        return "string";
-    }
-  }
-
-  async createStateObjectHelper(
-    path,
-    name,
-    type,
-    unit,
-    def,
-    role,
-    read,
-    write,
-    states,
-    native = {}
-  ) {
-    const common = {
-      name: name,
-      type: type,
-      unit: unit,
-      role: role,
-      read: read,
-      write: write,
-      states: states,
-    };
-
-    if (def !== undefined && def !== null && def !== "") {
-      common.def = def;
-    }
-
-    this.setObjectAsync(path, {
-      type: "state",
-      common: common,
-      native: native,
-    });
-  }
-
-  createDeviceObject(pathSegment, duid, state, type, states, options = {}) {
-    const {
-      write = false,
-      unit,
-      hasUnit = false,
-      def,
-      hasDef = false,
-    } = options;
-    const path = `Devices.${duid}.${pathSegment}.${state}`;
-    const name = this.translations[state];
-
-    const common = {
-      name: name,
-      type: type,
-      role: "value",
-    };
-
-    if (hasUnit) {
-      common.unit = unit;
-    }
-
-    common.read = true;
-    common.write = write;
-
-    if (hasDef) {
-      common.def = def;
-    }
-
-    common.states = states;
-
-    this.setObjectAsync(path, {
-      type: "state",
-      common: common,
-      native: {},
-    });
-  }
-
-  async createCommand(duid, command, type, defaultState, states) {
-    this.createDeviceObject("commands", duid, command, type, states, {
-      write: true,
-      hasDef: true,
-      def: defaultState,
-    });
-  }
-
-  async createDeviceStatus(duid, state, type, states, unit) {
-    this.createDeviceObject("deviceStatus", duid, state, type, states, {
-      write: false,
-      hasUnit: true,
-      unit,
-    });
-  }
-
-  async createDockingStationObject(duid) {
-    for (const state of dockingStationStates) {
-      const path = `Devices.${duid}.dockingStationStatus.${state}`;
-      const name = this.translations[state];
-
-      this.setObjectNotExistsAsync(path, {
-        type: "state",
-        common: {
-          name: name,
-          type: "number",
-          role: "value",
-          read: true,
-          write: false,
-          states: { 0: "UNKNOWN", 1: "ERROR", 2: "OK" },
-        },
-        native: {},
-      });
-    }
-  }
-
-  async createConsumable(duid, state, type, states, unit) {
-    this.createDeviceObject("consumables", duid, state, type, states, {
-      write: false,
-      hasUnit: true,
-      unit,
-    });
-  }
-
-  async createResetConsumables(duid, state) {
-    const path = `Devices.${duid}.resetConsumables.${state}`;
-    const name = this.translations[state];
-
-    this.setObjectNotExistsAsync(path, {
-      type: "state",
-      common: {
-        name: name,
-        type: "boolean",
-        role: "value",
-        read: true,
-        write: true,
-        def: false,
-      },
-      native: {},
-    });
-  }
-
-  async createCleaningRecord(duid, state, type, states, unit) {
-    let start = 0;
-    let end = 19;
-    const robotModel = this.getProductAttribute(duid, "model");
-    if (robotModel == "roborock.vacuum.a97") {
-      start = 1;
-      end = 20;
-    }
-
-    for (let i = start; i <= end; i++) {
-      await this.setObjectAsync(`Devices.${duid}.cleaningInfo.records.${i}`, {
-        type: "folder",
-        common: {
-          name: `Cleaning record ${i}`,
-        },
-        native: {},
-      });
-
-      this.setObjectAsync(
-        `Devices.${duid}.cleaningInfo.records.${i}.${state}`,
-        {
-          type: "state",
-          common: {
-            name: this.translations[state],
-            type: type,
-            role: "value",
-            unit: unit,
-            read: true,
-            write: false,
-            states: states,
-          },
-          native: {},
-        }
-      );
-
-      await this.setObjectAsync(
-        `Devices.${duid}.cleaningInfo.records.${i}.map`,
-        {
-          type: "folder",
-          common: {
-            name: "Map",
-          },
-          native: {},
-        }
-      );
-      for (const name of ["mapBase64", "mapBase64Truncated", "mapData"]) {
-        const objectString = `Devices.${duid}.cleaningInfo.records.${i}.map.${name}`;
-        await this.createStateObjectHelper(
-          objectString,
-          name,
-          "string",
-          null,
-          null,
-          "value",
-          true,
-          false
-        );
-      }
-    }
-  }
-
-  async createCleaningInfo(duid, key, object) {
-    const path = `Devices.${duid}.cleaningInfo.${key}`;
-    const name = this.translations[object.name];
-
-    this.setObjectAsync(path, {
-      type: "state",
-      common: {
-        name: name,
-        type: "number",
-        role: "value",
-        unit: object.unit,
-        read: true,
-        write: false,
-      },
-      native: {},
-    });
-  }
-
-  async createBaseRobotObjects(duid) {
-    for (const name of ["mapBase64", "mapBase64Truncated", "mapData"]) {
-      const objectString = `Devices.${duid}.map.${name}`;
-      await this.createStateObjectHelper(
-        objectString,
-        name,
-        "string",
-        null,
-        null,
-        "value",
-        true,
-        false
-      );
-    }
-
-    this.createNetworkInfoObjects(duid);
-  }
-
-  async createBasicVacuumObjects(duid) {
-    this.createNetworkInfoObjects(duid);
-  }
-
-  async createBasicWashingMachineObjects(duid) {
-    return this.createBasicVacuumObjects(duid);
-  }
-
-  async createNetworkInfoObjects(duid) {
-    for (const name of ["ssid", "ip", "mac", "bssid", "rssi"]) {
-      const objectString = `Devices.${duid}.networkInfo.${name}`;
-      const objectType = name == "rssi" ? "number" : "string";
-      await this.createStateObjectHelper(
-        objectString,
-        name,
-        objectType,
-        null,
-        null,
-        "value",
-        true,
-        false
-      );
-    }
-  }
+  // ioBroker object-tree builders. Homebridge has no object database, so
+  // these are no-ops kept only because deviceFeatures.js and vacuum.js call them.
+  async createStateObjectHelper() {}
+  async createCommand() {}
+  async createDeviceStatus() {}
+  async createDockingStationObject() {}
+  async createConsumable() {}
+  async createResetConsumables() {}
+  async createCleaningRecord() {}
+  async createCleaningInfo() {}
+  async createBaseRobotObjects() {}
+  async createBasicVacuumObjects() {}
+  async createBasicWashingMachineObjects() {}
 
   async startCommand(duid, command, parameters, options = {}) {
     if (!this.isInited()) {
@@ -6032,10 +5657,8 @@ class Roborock {
       return;
     }
 
-    const hasB01Device = [...this.initializedVacuumDuids].some(
-      (duid) =>
-        this.getVacuumDeviceInfo(duid, "pv") ===
-        b01Q7Adapter.B01_PROTOCOL_VERSION
+    const hasB01Device = [...this.initializedVacuumDuids].some((duid) =>
+      this.isB01Device(duid)
     );
     if (!hasB01Device) {
       return;
@@ -6046,10 +5669,7 @@ class Roborock {
     );
     const pollAllB01 = (options) => {
       for (const duid of this.initializedVacuumDuids) {
-        if (
-          this.getVacuumDeviceInfo(duid, "pv") ===
-          b01Q7Adapter.B01_PROTOCOL_VERSION
-        ) {
+        if (this.isB01Device(duid)) {
           void this.getStatus(duid, options).catch(() => undefined);
         }
       }
@@ -6081,9 +5701,6 @@ class Roborock {
       );
     }
     this.b01StatusLoopHandle = this.setInterval(pollAllB01, B01_STATUS_TICK_MS);
-    if (typeof this.b01StatusLoopHandle?.unref === "function") {
-      this.b01StatusLoopHandle.unref();
-    }
   }
 
   getB01RoomCache(duid) {
@@ -6258,9 +5875,6 @@ class Roborock {
           )
         );
       }, 20000);
-      if (typeof timeout?.unref === "function") {
-        timeout.unref();
-      }
       entry = { resolve, reject, timeout };
     });
     entry.promise = promise;
@@ -6620,9 +6234,7 @@ class Roborock {
     if (this.config.enableLiveRoomTracking === false) {
       return null;
     }
-    if (
-      this.getVacuumDeviceInfo(duid, "pv") === b01Q7Adapter.B01_PROTOCOL_VERSION
-    ) {
+    if (this.isB01Device(duid)) {
       return this.refreshB01LiveRoom(duid);
     }
     return this.refreshClassicLiveRoom(duid, context);
@@ -6633,9 +6245,7 @@ class Roborock {
    * @returns {{segmentId: number, roomName: string, at: number} | null}
    */
   getLiveRoomForDevice(duid) {
-    if (
-      this.getVacuumDeviceInfo(duid, "pv") === b01Q7Adapter.B01_PROTOCOL_VERSION
-    ) {
+    if (this.isB01Device(duid)) {
       return this.getB01LiveRoomForDevice(duid);
     }
     return this._classicLiveRoomState?.get(duid)?.current || null;
