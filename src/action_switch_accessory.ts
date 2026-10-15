@@ -1,6 +1,7 @@
 import { CharacteristicValue, PlatformAccessory } from "homebridge";
 import { setTimeout as nodeSetTimeout } from "node:timers";
 
+import { hapName } from "./hap_name";
 import RoborockPlatform from "./platform";
 import { clearTimer, scheduleTimer, unrefTimer } from "./timers";
 import { HomeKitActionKey } from "./types";
@@ -139,6 +140,7 @@ export default class RoborockActionSwitchAccessory {
       this.accessory.getService(Service.AccessoryInformation) ||
       this.accessory.addService(Service.AccessoryInformation);
     information
+      .setCharacteristic(Characteristic.Name, name)
       .setCharacteristic(Characteristic.Manufacturer, "Roborock")
       .setCharacteristic(
         Characteristic.Model,
@@ -155,6 +157,7 @@ export default class RoborockActionSwitchAccessory {
       this.accessory.getService(Service.Switch) ||
       this.accessory.addService(Service.Switch, name);
 
+    service.displayName = name;
     service.setCharacteristic(Characteristic.Name, name);
 
     const on = service.getCharacteristic(Characteristic.On);
@@ -172,15 +175,24 @@ export default class RoborockActionSwitchAccessory {
 
   /** Follow a rename in the Roborock app through to Apple Home. */
   updateIdentity(vacuumName: string): void {
-    const name = `${vacuumName} ${this.definition.nameSuffix}`;
+    const name = hapName(
+      vacuumName,
+      "Roborock Vacuum",
+      this.definition.nameSuffix
+    );
     if (this.accessory.displayName === name) {
       return;
     }
 
     this.accessory.displayName = name;
     this.accessory
-      .getService(this.platform.Service.Switch)
+      .getService(this.platform.Service.AccessoryInformation)
       ?.updateCharacteristic(this.platform.Characteristic.Name, name);
+    const service = this.accessory.getService(this.platform.Service.Switch);
+    if (service) {
+      service.displayName = name;
+      service.updateCharacteristic(this.platform.Characteristic.Name, name);
+    }
   }
 
   dispose(): void {

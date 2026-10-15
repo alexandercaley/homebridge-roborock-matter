@@ -1,5 +1,6 @@
 import { PlatformAccessory } from "homebridge";
 
+import { hapName } from "./hap_name";
 import RoborockPlatform from "./platform";
 import { HomeKitStateSensorKey } from "./types";
 
@@ -175,6 +176,7 @@ export default class RoborockStateSensorAccessory {
       this.accessory.getService(Service.AccessoryInformation) ||
       this.accessory.addService(Service.AccessoryInformation);
     information
+      .setCharacteristic(Characteristic.Name, name)
       .setCharacteristic(Characteristic.Manufacturer, "Roborock")
       .setCharacteristic(
         Characteristic.Model,
@@ -191,6 +193,7 @@ export default class RoborockStateSensorAccessory {
       this.accessory.getService(Service.ContactSensor) ||
       this.accessory.addService(Service.ContactSensor, name);
 
+    service.displayName = name;
     service.setCharacteristic(Characteristic.Name, name);
 
     const contact = service.getCharacteristic(
@@ -209,15 +212,26 @@ export default class RoborockStateSensorAccessory {
 
   /** Follow a rename in the Roborock app through to Apple Home. */
   updateIdentity(vacuumName: string): void {
-    const name = `${vacuumName} ${this.definition.nameSuffix}`;
+    const name = hapName(
+      vacuumName,
+      "Roborock Vacuum",
+      this.definition.nameSuffix
+    );
     if (this.accessory.displayName === name) {
       return;
     }
 
     this.accessory.displayName = name;
     this.accessory
-      .getService(this.platform.Service.ContactSensor)
+      .getService(this.platform.Service.AccessoryInformation)
       ?.updateCharacteristic(this.platform.Characteristic.Name, name);
+    const service = this.accessory.getService(
+      this.platform.Service.ContactSensor
+    );
+    if (service) {
+      service.displayName = name;
+      service.updateCharacteristic(this.platform.Characteristic.Name, name);
+    }
   }
 
   /**

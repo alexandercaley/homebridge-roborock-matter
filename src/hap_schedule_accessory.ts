@@ -1,4 +1,5 @@
 import { PlatformAccessory } from "homebridge";
+import { hapName } from "./hap_name";
 import RoborockPlatform from "./platform";
 import {
   CloudScene,
@@ -559,7 +560,7 @@ export default class RoborockHapScheduleAccessory {
     this.vacuumName = vacuumName;
     this.disposed = false;
 
-    const displayName = `${vacuumName} Schedules`;
+    const displayName = hapName(vacuumName, "Roborock Vacuum", "Schedules");
     this.managerAccessory.displayName = displayName;
 
     this.managerAccessory.context = {
@@ -658,8 +659,8 @@ export default class RoborockHapScheduleAccessory {
     } satisfies HapRoutineContext;
 
     const displayName = this.vacuumName
-      ? `${this.vacuumName} Routines`
-      : accessory.displayName || "Roborock Routines";
+      ? hapName(this.vacuumName, "Roborock Vacuum", "Routines")
+      : hapName(accessory.displayName, "Roborock Routines");
     accessory.displayName = displayName;
 
     const info =
@@ -769,10 +770,10 @@ export default class RoborockHapScheduleAccessory {
             enabled ? "on" : "off",
           ],
           source: "cloudScene",
-          name:
-            typeof rawName === "string" && rawName.trim()
-              ? rawName
-              : `Routine ${cloudSceneIdFromScheduleId(scheduleId)}`,
+          name: hapName(
+            rawName,
+            `Routine ${cloudSceneIdFromScheduleId(scheduleId)}`
+          ),
         });
         continue;
       }
@@ -1497,9 +1498,10 @@ export default class RoborockHapScheduleAccessory {
     let changed = false;
 
     for (const scene of scenes) {
+      const name = hapName(scene.name, `Routine ${scene.id}`);
       const existing = this.routineSwitches.get(scene.id);
       if (existing) {
-        existing.updateIdentity(scene.name);
+        existing.updateIdentity(name);
         continue;
       }
 
@@ -1509,7 +1511,7 @@ export default class RoborockHapScheduleAccessory {
         accessory,
         scene.id
       );
-      child.initialize(scene.name);
+      child.initialize(name);
       this.routineSwitches.set(scene.id, child);
       changed = true;
       this.platform.log.debug(
@@ -1577,10 +1579,7 @@ export default class RoborockHapScheduleAccessory {
       const rawName = service.getCharacteristic(
         this.platform.Characteristic.Name
       ).value;
-      const name =
-        typeof rawName === "string" && rawName.trim()
-          ? rawName
-          : `Routine ${sceneId}`;
+      const name = hapName(rawName, `Routine ${sceneId}`);
 
       const child = new RoborockHapRoutineSwitch(
         this.platform,
@@ -1786,9 +1785,19 @@ export default class RoborockHapScheduleAccessory {
       const schedule = schedules[i];
       const displayName =
         schedule.source === "cloudScene"
-          ? schedule.name ||
-            `${this.vacuumName} Routine ${cloudSceneIdFromScheduleId(schedule.id)}`
-          : `${this.vacuumName} Schedule ${++timerOrdinal}`;
+          ? hapName(
+              schedule.name,
+              hapName(
+                this.vacuumName,
+                "Roborock Vacuum",
+                `Routine ${cloudSceneIdFromScheduleId(schedule.id)}`
+              )
+            )
+          : hapName(
+              this.vacuumName,
+              "Roborock Vacuum",
+              `Schedule ${++timerOrdinal}`
+            );
       const existing = this.scheduleAccessories.get(schedule.id);
 
       if (existing) {

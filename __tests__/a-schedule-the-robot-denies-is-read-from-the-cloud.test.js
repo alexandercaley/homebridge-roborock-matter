@@ -324,7 +324,7 @@ describe("the schedules of a robot that keeps them in the cloud", () => {
     expect(result).toEqual({ success: true, hasSchedules: true });
     const switches = manager.services.filter((s) => s.UUID === "switch-uuid");
     expect(switches.map((s) => s.displayName)).toEqual([
-      "Saugen+",
+      "Saugen Plus",
       "Hinten",
       "Vorne",
     ]);
@@ -615,7 +615,7 @@ describe("the Routines accessory", () => {
       routineAccessory.services
         .filter((s) => s.UUID === "switch-uuid")
         .map((s) => s.displayName)
-    ).toEqual(["Saugen+", "Nur Küche"]);
+    ).toEqual(["Saugen Plus", "Nur Küche"]);
     expect(routineCounts).toEqual([2]);
     expect(coordinator.routineCount).toBe(2);
   });
@@ -634,7 +634,7 @@ describe("the Routines accessory", () => {
 
     expect(cloud.executeCloudScene).toHaveBeenCalledWith("1");
     expect(platform.log.info).toHaveBeenCalledWith(
-      'Running Roborock routine "Saugen+".'
+      'Running Roborock routine "Saugen Plus".'
     );
     on.setValue(true);
     await flushTimers(1500);
@@ -677,7 +677,7 @@ describe("the Routines accessory", () => {
     await expect(on.setHandler(true)).resolves.toBeUndefined();
     expect(platform.log.warn).toHaveBeenCalledWith(
       expect.stringMatching(
-        /Unable to run Roborock routine "Saugen\+": device offline/
+        /Unable to run Roborock routine "Saugen Plus": device offline/
       )
     );
   });
@@ -705,7 +705,7 @@ describe("the Routines accessory", () => {
     expect(counts).toEqual([1]);
 
     await coordinator.initialize("Rocky");
-    expect(routineSwitch(cached, "1").displayName).toBe("Saugen++");
+    expect(routineSwitch(cached, "1").displayName).toBe("Saugen Plus Plus");
     // One handler after the re-bind, not two.
     expect(on.listeners.set).toHaveLength(1);
   });

@@ -38,6 +38,7 @@ import {
   isHomeKitStateSensorKey,
   RoborockPlatformConfig,
 } from "./types";
+import { hapName } from "./hap_name";
 import { HAP_PLUGIN_IDENTIFIER, PLATFORM_NAME, PLUGIN_NAME } from "./settings";
 import { decryptSession } from "./crypto";
 import { readFileSync } from "node:fs";
@@ -807,7 +808,7 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
     );
     if (!accessory) {
       accessory = new this.api.platformAccessory(
-        `${vacuumName} Routines`,
+        hapName(vacuumName, "Roborock Vacuum", "Routines"),
         uuid
       );
     }
@@ -1022,7 +1023,7 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
 
       if (!accessory) {
         accessory = new this.api.platformAccessory(
-          `${target.vacuumName} schedules`,
+          hapName(target.vacuumName, "Roborock Vacuum", "Schedules"),
           uuid
         );
       }
@@ -1501,7 +1502,7 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
       return;
     }
 
-    const name = `${vacuumName} ${definition.nameSuffix}`;
+    const name = hapName(vacuumName, "Roborock Vacuum", definition.nameSuffix);
 
     const uuid = this.api.hap.uuid.generate(stateSensorUuidSeed(duid, sensor));
     const context: StateSensorContext = {
@@ -1695,7 +1696,7 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
       return;
     }
 
-    const name = `${vacuumName} ${definition.nameSuffix}`;
+    const name = hapName(vacuumName, "Roborock Vacuum", definition.nameSuffix);
 
     const uuid = this.api.hap.uuid.generate(actionSwitchUuidSeed(duid, action));
     const context: ActionSwitchContext = {
