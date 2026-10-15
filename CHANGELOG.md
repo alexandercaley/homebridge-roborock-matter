@@ -6,6 +6,7 @@
 
 ### My own mistakes first
 
+- 3.39.0-beta.1 could end the plugin's child bridge 30 seconds after a failed start was retried during a network outage. To retire the MQTT client of the failed attempt, it removed all of the client's listeners, mqtt.js's own among them. If that client was still waiting for the broker to answer, its connect timeout fired 30 seconds later with no error listener left, and an error event nobody listens to ends the process. A client the plugin lets go of now keeps its listeners, and they ignore it. The first release run of 3.39.0 caught it, and nothing was published until it was fixed.
 - 3.38.0 said a room selection spanning 2 maps is refused with `InvalidSet`, so the controller keeps its previous selection. It never was. Homebridge 2.4.0 throws a `selectAreas` handler's return value away and then runs matter.js's own `selectAreas`, so matter.js stored the selection, this plugin kept its old one, and the next heartbeat put the old one back. A refusal is now thrown (`ConstraintError`), which stops matter.js from storing anything. Homebridge logs it as a handler error right after the plugin's warning; that line is expected.
 - 3.38.0 still asked for a bug report when a robot's map replies went to another controller and none to this plugin. The endpoint sent and the endpoint checked are the same value, so that only says the robot sent no map reply to this plugin. The line no longer asks for a report. A frame that carries this plugin's endpoint and still cannot be used now names the likely cause: a second Homebridge on the same Roborock account, which shares the endpoint.
 - 3.38.0 reached npm a day late, because the publishing token had expired.
@@ -33,6 +34,7 @@ QoS 1 had a cost of its own: mqtt.js resends an unacknowledged publish after a r
 - A start that failed after the MQTT client was created was retried with a second client on the same client id, without ending the first one or its 2 timers.
 - A home-data refresh that landed after shutdown started the polling loops again.
 - A B01 map request in flight at shutdown fired its 20-second timer into a stopped adapter.
+- A fresh MQTT session started in the seconds before shutdown brought the closed client back afterwards.
 - A request refused before sending could delete the pending entry of another request with the same id, which then timed out although its reply arrived.
 - A poll still on the wire when Homebridge stopped was logged as "Failed to execute … Homebridge is shutting down" at error level. Seen on my own server at the 3.38.0 restart.
 
@@ -42,7 +44,9 @@ About 640 lines that never ran are gone: the object-tree builders left from the 
 
 ### Tests
 
-2,251 tests, 50 more than 3.38.0. Measured against the 3.38.0 sources, file by file: 7 of 9 fail for #24, 2 of 3 for the schedule switch, 3 of 3 for the cloud request, 4 of 4 for a publish the link refuses, 4 of 4 for shutdown and restart, 1 of 1 for the colliding id, 2 of 8 for the give-up line. The name tests mostly exercise a function 3.38.0 did not have; 2 of 22 fail against its call sites.
+2,255 tests, 54 more than 3.38.0. Measured against the 3.38.0 sources, file by file: 7 of 9 fail for #24, 2 of 3 for the schedule switch, 3 of 3 for the cloud request, 4 of 4 for a publish the link refuses, 4 of 4 for shutdown and restart, 1 of 1 for the colliding id, 2 of 8 for the give-up line. The name tests mostly exercise a function 3.38.0 did not have; 2 of 22 fail against its call sites. The crash on a retried start was never in a stable release; 3 of its 4 tests fail against the code the first 3.39.0 release run tested.
+
+CI now runs the suite in one process, as the release workflow does, so a timer a test leaves behind fails CI instead of a release.
 
 ## 3.38.0
 
