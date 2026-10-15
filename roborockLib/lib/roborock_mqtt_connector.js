@@ -714,7 +714,7 @@ class roborock_mqtt_connector {
               if (!String(data2.endpoint || "").startsWith(endpoint)) {
                 noteDroppedFrame(duid, "addressed-elsewhere");
                 this.adapter.log.debug(
-                  `Dropped a protocol 301 message for ${duid}: it is addressed to endpoint '${data2.endpoint}', and this plugin's endpoint is '${endpoint}'. The reply was received and decrypted but is not ours, so the request that is waiting will time out. If you are seeing map or live-room requests time out on a robot that answers everything else, this line is the reason — please report it.`
+                  `Ignored a protocol 301 message for ${duid}: it is addressed to endpoint '${data2.endpoint}', and this plugin's endpoint is '${endpoint}'. It belongs to another controller on the same Roborock account (the Roborock app, for one), so ignoring it is expected.`
                 );
                 return;
               }

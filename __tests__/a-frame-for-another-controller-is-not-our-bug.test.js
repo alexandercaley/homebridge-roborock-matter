@@ -124,18 +124,24 @@ describe("the give-up line tells another controller from a bug here", () => {
     expect(giveUp).not.toMatch(/Please report this/);
   });
 
-  test("drops for another controller with nothing ever accepted IS called a bug", async () => {
+  // 3.38.0 called this one a bug here. The endpoint sent and the endpoint
+  // checked are the same value, so "nothing addressed to us" only means the
+  // robot sent no map reply to this plugin — which the line already says.
+  test("drops for another controller with nothing ever accepted are not called a bug either", async () => {
     const giveUp = await giveUpOnMap(() => {
       for (let i = 0; i < 30; i += 1) {
         noteDroppedFrame(DUID, "addressed-elsewhere");
       }
     });
 
-    expect(giveUp).toMatch(/not one map reply frame has ever been addressed/);
-    expect(giveUp).toMatch(/it is a bug here/);
+    expect(giveUp).toMatch(/addressed to a different controller/);
+    expect(giveUp).toMatch(/No reply to this plugin's own map request arrived/);
+    expect(giveUp).not.toMatch(/bug here/);
+    expect(giveUp).not.toMatch(/account key/);
+    expect(giveUp).not.toMatch(/please report/i);
   });
 
-  test("a frame that WAS addressed to us and still dropped stays a bug here", async () => {
+  test("a frame with our endpoint that could not be used names the second-instance cause", async () => {
     const giveUp = await giveUpOnMap(() => {
       noteAcceptedFrame(DUID);
       noteDroppedFrame(DUID, "no-request-waiting");
@@ -143,7 +149,9 @@ describe("the give-up line tells another controller from a bug here", () => {
     });
 
     expect(giveUp).toMatch(/no-request-waiting: 2/);
-    expect(giveUp).toMatch(/it is a bug here/);
+    expect(giveUp).toMatch(/same Roborock account/);
+    expect(giveUp).toMatch(/please report this line/);
+    expect(giveUp).not.toMatch(/it is a bug here/);
   });
 
   test("a robot with no frames at all keeps the plain silent verdict", async () => {
