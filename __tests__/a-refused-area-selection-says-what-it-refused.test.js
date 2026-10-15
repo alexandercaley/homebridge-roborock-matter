@@ -78,11 +78,10 @@ function lines(mock) {
 describe("the selection request line names what arrived", () => {
   test("a selection that is understood in full reads exactly as before", async () => {
     const { accessory, log } = createAccessory({ rooms: ONE_MAP });
-    const result = await accessory.handlers.serviceArea.selectAreas({
+    await accessory.handlers.serviceArea.selectAreas({
       newAreas: [25, 18, 20, 24],
     });
 
-    expect(result.status).toBe(0);
     const request = lines(log.info).find((line) =>
       /service area selection request/.test(line)
     );
@@ -144,11 +143,11 @@ describe("a selection spanning two maps says so, and warns about the revert", ()
       ],
     });
 
-    const result = await accessory.handlers.serviceArea.selectAreas({
-      newAreas: [16, 17, ATTIC],
-    });
-
-    expect(result.status).toBe(3);
+    await expect(
+      accessory.handlers.serviceArea.selectAreas({
+        newAreas: [16, 17, ATTIC],
+      })
+    ).rejects.toThrow();
     const refusal = lines(log.warn).find((line) => /spanning/.test(line));
     expect(refusal).toMatch(/2 Roborock maps/);
     expect(refusal).toMatch(new RegExp(`16, 17, ${ATTIC}`));
@@ -164,9 +163,11 @@ describe("a selection spanning two maps says so, and warns about the revert", ()
     });
 
     await accessory.handlers.serviceArea.selectAreas({ newAreas: [16] });
-    await accessory.handlers.serviceArea.selectAreas({
-      newAreas: [16, ATTIC],
-    });
+    await expect(
+      accessory.handlers.serviceArea.selectAreas({
+        newAreas: [16, ATTIC],
+      })
+    ).rejects.toThrow();
 
     expect(vacuum.buildServiceAreaCluster().selectedAreas).toEqual([16]);
   });

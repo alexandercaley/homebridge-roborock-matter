@@ -835,13 +835,6 @@ const BATTERY_REPLACEABILITY = {
 } as const;
 const BATTERY_ESTIMATED_CHARGE_SECONDS_PER_PERCENT = 180;
 
-const SERVICE_AREA_SELECT_STATUS = {
-  SUCCESS: 0,
-  UNSUPPORTED_AREA: 1,
-  INVALID_IN_MODE: 2,
-  INVALID_SET: 3,
-} as const;
-
 const MATTER_LOCATION_NAME_MAX_LENGTH = 64;
 const MATTER_MAP_NAME_MAX_LENGTH = 64;
 const MATTER_AREA_ID_MAP_MULTIPLIER = 1_000_000;
@@ -1972,7 +1965,7 @@ export default class RoborockMatterVacuumAccessory {
     if (this.isServiceAreaEnabled()) {
       handlers.serviceArea = {
         selectAreas: async (request?: { newAreas?: unknown }) => {
-          return await this.selectServiceAreas(request?.newAreas);
+          await this.selectServiceAreas(request?.newAreas);
         },
       };
     }
@@ -4453,35 +4446,46 @@ export default class RoborockMatterVacuumAccessory {
       : null;
   }
 
-  private async selectServiceAreas(
-    newAreas?: unknown
-  ): Promise<Record<string, unknown>> {
+  /**
+   * Homebridge 2.4.0's `selectAreas` (dist/matter/behaviors/
+   * ServiceAreaBehavior.js) runs this handler and then ALWAYS runs matter.js's
+   * own `ServiceAreaServer.selectAreas`, whose answer is what the controller
+   * receives. Whatever this handler returns is thrown away. Until 3.39.0 it
+   * returned an InvalidSet status that never reached anybody: matter.js
+   * stored the refused selection, this plugin kept its old one, and the next
+   * heartbeat put the old one back. The only way to refuse is to throw, which
+   * stops matter.js from storing anything — so the plugin's selection and the
+   * controller's can no longer drift apart.
+   */
+  private async selectServiceAreas(newAreas?: unknown): Promise<void> {
     const supportedAreas = new Map(
       this.getMatterServiceAreas().map((area) => [area.areaId, area])
     );
-    const selectedAreas = this.normalizeMatterAreaIds(newAreas);
+    const {
+      areaIds: selectedAreas,
+      unreadable,
+      repeated,
+    } = this.readMatterAreaIds(newAreas);
     const unsupportedArea = selectedAreas.find(
       (areaId) => !supportedAreas.has(areaId)
     );
 
-    // WHAT ARRIVED, NOT ONLY WHAT WAS UNDERSTOOD — #24.
-    //
-    // The line used to print the normalised ids alone, so "the controller
-    // cleared the selection" and "the controller sent eight ids and this
-    // plugin read none of them" were the same five characters: `none`. #24
-    // reported a selection that reverts when all eight rooms are picked, and
-    // the only log line covering it could not say which of the two had
-    // happened — a week per guess, at one run a week.
+    // WHAT ARRIVED, NOT ONLY WHAT WAS UNDERSTOOD — #24. "none" used to stand
+    // for an empty list, a list nothing could be read from and no list at all.
     const requestedCount = Array.isArray(newAreas) ? newAreas.length : null;
-    const unreadable =
-      requestedCount === null ? 0 : requestedCount - selectedAreas.length;
+    const notes = [
+      unreadable > 0
+        ? `${unreadable} of which could not be read as an area id`
+        : "",
+      repeated > 0 ? `${repeated} repeated` : "",
+    ].filter(Boolean);
     const requestDetail =
       requestedCount === null
         ? " (the controller sent no area list)"
         : requestedCount === 0
-          ? " (the controller sent an empty list)"
-          : unreadable > 0
-            ? ` (the controller sent ${requestedCount} entr${requestedCount === 1 ? "y" : "ies"}, ${unreadable} of which could not be read as an area id)`
+          ? " (the controller sent an empty list, which Matter defines as no area restriction)"
+          : notes.length > 0
+            ? ` (the controller sent ${requestedCount} entr${requestedCount === 1 ? "y" : "ies"}, ${notes.join(", ")})`
             : "";
 
     this.platform.log.info(
@@ -4489,10 +4493,16 @@ export default class RoborockMatterVacuumAccessory {
     );
 
     if (unsupportedArea !== undefined) {
-      return {
-        status: SERVICE_AREA_SELECT_STATUS.UNSUPPORTED_AREA,
-        statusText: `Area ${unsupportedArea} is not available from the Roborock room map.`,
-      };
+      // Thrown rather than left to matter.js's own UnsupportedArea check,
+      // which tests its last published room list: when that differs from the
+      // plugin's, matter.js would store a selection the plugin refused.
+      this.platform.log.warn(
+        `Matter service area ${unsupportedArea} is not on the Roborock room map of ${this.getVacuumName()}, so the selection is refused and the controller keeps its previous one.`
+      );
+      throw this.createMatterStatusError(
+        "ConstraintError",
+        `Area ${unsupportedArea} is not available from the Roborock room map.`
+      );
     }
 
     const selectedMapIds = this.getSelectedServiceAreaMapIds(
@@ -4501,21 +4511,27 @@ export default class RoborockMatterVacuumAccessory {
         .filter((area): area is MatterServiceArea => area !== undefined)
     );
     if (selectedMapIds.length > 1) {
-      // A refused selection is not a cleared one: the controller keeps the set
-      // it last had accepted. That is precisely the "it falls back to the two
-      // rooms I cleaned this morning" of #24, and the old warning described
-      // neither the cause (which maps) nor the visible effect (the revert).
       this.platform.log.warn(
         `Ignoring Matter service area selection spanning ${selectedMapIds.length} Roborock maps for ${this.getVacuumName()} (maps ${selectedMapIds.join(", ")}; areas ${selectedAreas.join(", ")}); select areas from one map at a time. The selection is refused, not cleared, so the controller will keep showing the previous selection.`
       );
-      return {
-        status: SERVICE_AREA_SELECT_STATUS.INVALID_SET,
-        statusText:
-          "Select service areas from only one Roborock map at a time.",
-      };
+      throw this.createMatterStatusError(
+        "ConstraintError",
+        "Select service areas from only one Roborock map at a time."
+      );
     }
 
     this.selectedServiceAreaIds = selectedAreas;
+    // A SELECTION MADE BETWEEN RUNS HAS NO PROGRESS YET — #24.
+    //
+    // Progress is persisted, so the finished rooms of the morning's run were
+    // still published when Marrand picked all eight rooms in the afternoon.
+    // Apple Home sends an empty list for "all rooms" (Matter: no restriction),
+    // and with nothing selected it showed the two rooms in that stale
+    // progress, every time. A run in progress keeps its own progress; the
+    // new selection applies to the next run.
+    if (!this.isInCleaningRunMode(this.getOperationalState())) {
+      this.clearServiceAreaProgress();
+    }
     if (selectedAreas.length > 0) {
       const areaNames = selectedAreas
         .map((areaId) => supportedAreas.get(areaId))
@@ -4526,7 +4542,7 @@ export default class RoborockMatterVacuumAccessory {
       );
     } else {
       this.platform.log.info(
-        `Cleared Matter service area selection for ${this.getVacuumName()}.`
+        `Cleared Matter service area selection for ${this.getVacuumName()}; Start cleans every room.`
       );
     }
 
@@ -4543,11 +4559,22 @@ export default class RoborockMatterVacuumAccessory {
       });
     }, 0);
     unrefTimer(publishTimer);
+  }
 
-    return {
-      status: SERVICE_AREA_SELECT_STATUS.SUCCESS,
-      statusText: "",
-    };
+  /**
+   * An error Homebridge passes to the controller as a Matter status, through
+   * `api.matter.status` (Homebridge's own advice: not a value import of
+   * `MatterStatus`). A plain Error is wrapped as Failure, which still stops
+   * matter.js from storing anything.
+   */
+  private createMatterStatusError(
+    status: "ConstraintError",
+    message: string
+  ): Error {
+    const StatusError = this.platform.getMatterApi()?.status?.[status];
+    return typeof StatusError === "function"
+      ? new StatusError(message)
+      : new Error(message);
   }
 
   private getMatterServiceAreas(): MatterServiceArea[] {
@@ -4753,29 +4780,36 @@ export default class RoborockMatterVacuumAccessory {
       .filter((area): area is MatterServiceArea => area !== undefined);
   }
 
-  private normalizeMatterAreaIds(newAreas: unknown): number[] {
+  /**
+   * The area ids in a SelectAreas request, in order and without repeats —
+   * the same list matter.js stores — with what was dropped counted apart.
+   */
+  private readMatterAreaIds(newAreas: unknown): {
+    areaIds: number[];
+    unreadable: number;
+    repeated: number;
+  } {
+    const areaIds: number[] = [];
+    let unreadable = 0;
+    let repeated = 0;
     if (!Array.isArray(newAreas)) {
-      return [];
+      return { areaIds, unreadable, repeated };
     }
 
-    const selectedAreas: number[] = [];
     const seenAreaIds = new Set<number>();
     for (const area of newAreas) {
       const areaId = this.getNumberFromValue(area);
-      if (
-        areaId === null ||
-        !Number.isInteger(areaId) ||
-        areaId < 0 ||
-        seenAreaIds.has(areaId)
-      ) {
-        continue;
+      if (areaId === null || !Number.isInteger(areaId) || areaId < 0) {
+        unreadable += 1;
+      } else if (seenAreaIds.has(areaId)) {
+        repeated += 1;
+      } else {
+        seenAreaIds.add(areaId);
+        areaIds.push(areaId);
       }
-
-      seenAreaIds.add(areaId);
-      selectedAreas.push(areaId);
     }
 
-    return selectedAreas;
+    return { areaIds, unreadable, repeated };
   }
 
   private clampMatterName(

@@ -610,7 +610,10 @@ describe("Matter service area selection", () => {
     expect(accessory.handlers.serviceArea).toBeUndefined();
   });
 
-  test("rejects selections spanning multiple maps with INVALID_SET", async () => {
+  // Homebridge 2.4.0 throws a handler's return value away and runs matter.js's
+  // own selectAreas after it; only a throw stops matter.js from storing the
+  // selection (3.39.0, #24).
+  test("refuses selections spanning multiple maps by throwing", async () => {
     const platform = createPlatform({
       rooms: [
         { segmentId: 16, mapId: 0, name: "Kitchen" },
@@ -624,11 +627,11 @@ describe("Matter service area selection", () => {
     const { accessory } = createAccessory(platform, true);
 
     // areaId = mapId * 1_000_000 + segmentId
-    const result = await accessory.handlers.serviceArea.selectAreas({
-      newAreas: [16, 1_000_017],
-    });
-
-    expect(result.status).toBe(3); // INVALID_SET
+    await expect(
+      accessory.handlers.serviceArea.selectAreas({
+        newAreas: [16, 1_000_017],
+      })
+    ).rejects.toThrow(/only one Roborock map/);
     // 3.38.0 made the refusal specific: how many maps, which ones, which
     // areas, and that the controller keeps its previous selection (#24).
     expect(platform.log.warn).toHaveBeenCalledWith(
@@ -636,7 +639,7 @@ describe("Matter service area selection", () => {
     );
   });
 
-  test("accepts a single-map selection with SUCCESS", async () => {
+  test("accepts a single-map selection", async () => {
     const platform = createPlatform({
       rooms: [
         { segmentId: 16, mapId: 0, name: "Kitchen" },
@@ -646,11 +649,12 @@ describe("Matter service area selection", () => {
     });
     const { accessory } = createAccessory(platform, true);
 
-    const result = await accessory.handlers.serviceArea.selectAreas({
-      newAreas: [16, 18],
-    });
-
-    expect(result.status).toBe(0); // SUCCESS
+    await expect(
+      accessory.handlers.serviceArea.selectAreas({ newAreas: [16, 18] })
+    ).resolves.toBeUndefined();
+    expect(await accessory.getState("serviceArea", "selectedAreas")).toEqual([
+      16, 18,
+    ]);
   });
 
   test("reports travel and cleaning status for a selected room", async () => {
