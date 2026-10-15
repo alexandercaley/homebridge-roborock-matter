@@ -16,27 +16,32 @@ export const HAP_NAME_MAX_LENGTH = 64;
  * A name HAP already accepts comes back unchanged, so no valid accessory is
  * renamed. Otherwise "+" reads as " Plus " ("Q5 Max+" -> "Q5 Max Plus"),
  * any other unsupported character becomes a space, whitespace collapses, the
- * base is cut so the suffix always fits in 64, and both ends are trimmed to a
- * letter, number or combining mark. Combining marks are kept: dropping them
+ * base is cut so the suffix always fits in 64, and the start is trimmed to a
+ * letter or number — and, without a suffix, the end to a letter, number or
+ * combining mark. Combining marks are kept: dropping them
  * would turn a Hindi or Thai word into a different word to silence a warning.
  * Fewer than two characters left means `fallback` is used instead.
  */
 export function hapName(base: unknown, fallback: string, suffix = ""): string {
   const tail = suffix ? ` ${suffix}` : "";
   const budget = HAP_NAME_MAX_LENGTH - tail.length;
-  const text = typeof base === "string" ? base.normalize("NFC") : "";
+  const raw = typeof base === "string" ? base : "";
 
   // HAP judges the whole name, so a base ending in ")" or "'" is fine in
-  // front of a suffix. A name HAP already accepts is never touched.
-  if (text.length <= budget && HAP_NAME_PATTERN.test(text + tail)) {
-    return text + tail;
+  // front of a suffix. A name HAP already accepts is never touched — not
+  // even re-normalised.
+  if (raw.length <= budget && HAP_NAME_PATTERN.test(raw + tail)) {
+    return raw + tail;
   }
 
-  const spaced = text
+  const spaced = raw
+    .normalize("NFC")
     .replace(/\+/g, " Plus ")
     .replace(/[\uFE00-\uFE0F]/g, "")
     .replace(/[^\p{L}\p{Mn}\p{Mc}\p{N}\p{Zs}\u2019'&!._:;()/,-]+/gu, " ")
-    .replace(/\s+/gu, " ");
+    .replace(/\s+/gu, " ")
+    // "S8+)" became "S8 Plus )": no space before closing punctuation.
+    .replace(/\s+(?=[)\u2019',.!:;])/gu, "");
 
   let cut = "";
   for (const character of spaced) {

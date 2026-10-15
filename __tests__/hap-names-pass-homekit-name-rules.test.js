@@ -54,6 +54,15 @@ describe("hapName", () => {
     expect(hapName("Q5 Max+ (OG)", "Roborock Vacuum", "Docked")).toBe(
       "Q5 Max Plus (OG) Docked"
     );
+    expect(hapName("Roborock (S8+)", "Roborock Vacuum", "Docked")).toBe(
+      "Roborock (S8 Plus) Docked"
+    );
+  });
+
+  test("a valid name in decomposed Unicode is not re-normalised", () => {
+    const decomposed = "\u1112\u1161\u11ab\u1100\u1173\u11af";
+    expect(decomposed.normalize("NFC")).not.toBe(decomposed);
+    expect(hapName(decomposed, "x", "Docked")).toBe(`${decomposed} Docked`);
   });
 
   test("a long robot name is cut, never the suffix, and fits Name's 64", () => {

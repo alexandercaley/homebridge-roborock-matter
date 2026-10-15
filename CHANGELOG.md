@@ -20,13 +20,13 @@ HAP stores the requested value once a switch handler returns, over anything the 
 
 ### HomeKit names (#40)
 
-HAP-NodeJS 2.2 (Homebridge 2.4.0) warns for every accessory whose name does not start and end with a letter or number, or carries anything besides letters, numbers, spaces and `' & ! . _ : ; ( ) / , -`. A robot called "Q5 Max+" warned for every switch and sensor, and a Routine called "Saugen+" for its switch. Every HomeKit name now goes through one function: a name HAP accepts is left exactly as it is, `+` reads as "Plus", and other unsupported characters become spaces. Nothing is re-registered, a name you gave a switch in the Home app stays, and Matter names are not affected.
+HAP-NodeJS 2.2 (Homebridge 2.4.0) warns for every accessory whose name does not start and end with a letter or number, or carries anything besides letters, numbers, spaces and `' & ! . _ : ; ( ) / , -`. A robot called "Q5 Max+" warned for every switch and sensor, and a Routine called "Saugen+" for its switch. Every HomeKit name now goes through one function: a name HAP accepts is left exactly as it is, `+` reads as "Plus", and other unsupported characters become spaces. Combining marks are kept, so a few Hindi or Thai names may still warn. Nothing is re-registered, a name you gave a switch in the Home app stays, and Matter names are not affected.
 
 ### Cloud requests, sent the way python-roborock sends them
 
 2 differences remained on the cloud path of `get_map_v1`, the request some classic robots leave unanswered while python-roborock gets maps from them (my own S8 Pro Ultra is one): QoS 1 instead of 0, and the security nonce in uppercase. Both now match, and the map request is pinned against a payload produced by python-roborock 7.12.0 itself. Whether that is what those robots needed is not known yet.
 
-QoS 1 had a cost of its own: mqtt.js resends an unacknowledged publish after a reconnect, and by default it queues a QoS 0 publish made while disconnected. A publish made while the link is down is now dropped, so a Start or a Dock the plugin had already reported as failed can no longer reach the robot minutes later.
+QoS 1 had a cost of its own: mqtt.js resends an unacknowledged publish after a reconnect, and by default it queues a QoS 0 publish made while disconnected. A publish made while the link is down is now refused at once and its request fails as "cloud unavailable", so a Start or a Dock the plugin had already reported as failed can no longer reach the robot minutes later, and a dropped link is not counted as a robot that did not answer.
 
 ### Shutdown and restart
 
@@ -34,6 +34,7 @@ QoS 1 had a cost of its own: mqtt.js resends an unacknowledged publish after a r
 - A home-data refresh that landed after shutdown started the polling loops again.
 - A B01 map request in flight at shutdown fired its 20-second timer into a stopped adapter.
 - A request refused before sending could delete the pending entry of another request with the same id, which then timed out although its reply arrived.
+- A poll still on the wire when Homebridge stopped was logged as "Failed to execute … Homebridge is shutting down" at error level. Seen on my own server at the 3.38.0 restart.
 
 ### Code
 
@@ -41,7 +42,7 @@ About 640 lines that never ran are gone: the object-tree builders left from the 
 
 ### Tests
 
-2,241 tests, 40 more than 3.38.0. Measured against the 3.38.0 sources, file by file: 7 of 9 fail for #24, 2 of 3 for the schedule switch, 3 of 3 for the cloud request, 3 of 3 for shutdown and restart, 1 of 1 for the colliding id, 2 of 8 for the give-up line. The name tests mostly exercise a function 3.38.0 did not have; 2 of 21 fail against its call sites.
+2,242 tests, 41 more than 3.38.0. Measured against the 3.38.0 sources, file by file: 7 of 9 fail for #24, 2 of 3 for the schedule switch, 3 of 3 for the cloud request, 4 of 4 for shutdown and restart, 1 of 1 for the colliding id, 2 of 8 for the give-up line. The name tests mostly exercise a function 3.38.0 did not have; 2 of 21 fail against its call sites.
 
 ## 3.38.0
 

@@ -183,7 +183,7 @@ function describeCloudSilence(adapter, duid, receiptsAtSend) {
  * @typedef {Object} MqttConnector
  * @property {import("./mqttSessionDiagnostics").MqttSessionDiagnostics} [sessionDiagnostics]
  * @property {() => boolean} isConnected
- * @property {(duid: string, message: Buffer) => void} sendMessage
+ * @property {(duid: string, message: Buffer, onNotSent?: (error: Error) => void) => void} sendMessage
  */
 
 /**
@@ -557,7 +557,23 @@ class messageQueueHandler {
           // it". Nothing downstream may treat it as confirmation: the state
           // the tile shows still comes from the optimistic-state machinery,
           // which self-corrects against what the robot actually reports.
-          this.adapter.rr_mqtt_connector.sendMessage(duid, roborockMessage);
+          let notSent = null;
+          this.adapter.rr_mqtt_connector.sendMessage(
+            duid,
+            roborockMessage,
+            (/** @type {Error} */ error) => {
+              notSent = error;
+            }
+          );
+          if (notSent) {
+            reject(
+              refusal(
+                "cloud unavailable",
+                `The Roborock cloud connection was lost before the ${method} write could be sent, so it was not sent.`
+              )
+            );
+            return;
+          }
           this.adapter.updateTransportDiagnostics(duid, {
             lastTransport: "cloud",
             lastTransportReason: "b01-q10-fire-and-forget",
@@ -709,7 +725,28 @@ class messageQueueHandler {
                 `Device ${duid} is marked offline, but sending method ${method} via cloud because the command explicitly allows offline cloud delivery.`
               );
             }
-            this.adapter.rr_mqtt_connector.sendMessage(duid, roborockMessage);
+            // The link can drop between the connection check above and this
+            // publish (there are awaits in between). mqtt.js then refuses the
+            // publish; fail the request now, as the refusal it is, rather than
+            // let its timeout read a dead link as a robot that did not answer.
+            this.adapter.rr_mqtt_connector.sendMessage(
+              duid,
+              roborockMessage,
+              () => {
+                const pending = this.adapter.pendingRequests.get(messageID);
+                if (!pending) {
+                  return;
+                }
+                this.adapter.clearTimeout(pending.timeout);
+                this.adapter.pendingRequests.delete(messageID);
+                reject(
+                  refusal(
+                    "cloud unavailable",
+                    `The Roborock cloud connection was lost before the ${method} request could be sent, so it was not sent.`
+                  )
+                );
+              }
+            );
             const lastTransportReason =
               [
                 {
@@ -778,5 +815,6 @@ class messageQueueHandler {
 module.exports = {
   messageQueueHandler,
   getRequestTimeout,
+  refusal,
   DEFAULT_REQUEST_TIMEOUT,
 };

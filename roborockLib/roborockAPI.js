@@ -19,6 +19,7 @@ const supportsMaxPlusFanPower =
 const RRMapParser = require("./lib/RRMapParser");
 const messageQueueHandler =
   require("./lib/messageQueueHandler").messageQueueHandler;
+const { refusal } = require("./lib/messageQueueHandler");
 const hawkSignature = require("./lib/hawkSignature");
 const { METHOD_REFUSED_CODE } = require("./lib/describeReplyRefusal");
 const {
@@ -5940,7 +5941,22 @@ class Roborock {
     });
     entry.promise = promise;
     this.pendingB01MapRequests.set(duid, entry);
-    this.rr_mqtt_connector.sendMessage(duid, roborockMessage);
+    // Refused by mqtt.js (the link dropped): fail now as a transport refusal,
+    // which the give-up register does not count, rather than after 20 s as a
+    // robot that did not answer.
+    this.rr_mqtt_connector.sendMessage(duid, roborockMessage, () => {
+      if (this.pendingB01MapRequests.get(duid) !== entry) {
+        return;
+      }
+      this.clearTimeout(entry.timeout);
+      this.pendingB01MapRequests.delete(duid);
+      entry.reject(
+        refusal(
+          "cloud unavailable",
+          `The Roborock cloud connection was lost before the B01 map request for ${this.describeDevice(duid)} could be sent, so it was not sent.`
+        )
+      );
+    });
     return promise;
   }
 

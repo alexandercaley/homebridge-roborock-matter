@@ -862,10 +862,25 @@ class roborock_mqtt_connector {
    * down is dropped, and the request it belongs to times out like any other
    * unanswered request instead of being replayed later.
    */
-  sendMessage(duid, roborockMessage) {
-    client.publish(`rr/m/i/${rriot.u}/${mqttUser}/${duid}`, roborockMessage, {
-      qos: 0,
-    });
+  /**
+   * @param {string} duid
+   * @param {Buffer} roborockMessage
+   * @param {(error: Error) => void} [onNotSent] Called when mqtt.js refuses
+   *   the publish (no connection to the broker, or the client is closing),
+   *   so the caller can fail the request at once instead of waiting out its
+   *   timeout and reading a dead link as a silent robot.
+   */
+  sendMessage(duid, roborockMessage, onNotSent) {
+    client.publish(
+      `rr/m/i/${rriot.u}/${mqttUser}/${duid}`,
+      roborockMessage,
+      { qos: 0 },
+      (error) => {
+        if (error) {
+          onNotSent?.(error);
+        }
+      }
+    );
   }
 
   isConnected() {
