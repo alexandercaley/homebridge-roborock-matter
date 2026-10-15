@@ -1992,7 +1992,7 @@ class RoborockHapScheduleSwitchAccessory {
         RoborockHapScheduleSwitchAccessory.FAILED_COMMAND_COOLDOWN_MS
     ) {
       this.updateService(previous);
-      return;
+      throw this.writeFailed();
     }
 
     try {
@@ -2039,7 +2039,26 @@ class RoborockHapScheduleSwitchAccessory {
           `Further attempts for this same state are suppressed for ` +
           `${RoborockHapScheduleSwitchAccessory.FAILED_COMMAND_COOLDOWN_MS / 1000}s.`
       );
+      throw this.writeFailed();
     }
+  }
+
+  /**
+   * What a failed write throws back to HAP.
+   *
+   * HAP stores the requested value once an onSet handler RESOLVES, over any
+   * value the handler wrote while it ran. Restoring the previous state and
+   * returning normally therefore left the switch showing the state the
+   * Roborock cloud had just refused, and told every other controller it had
+   * changed, until the next refresh flipped it back without a word. Only a
+   * throw keeps the previous value, and it is also how Home learns the write
+   * failed.
+   */
+  private writeFailed(): Error {
+    const hap = this.platform.api?.hap;
+    return typeof hap?.HapStatusError === "function"
+      ? new hap.HapStatusError(hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+      : new Error("The Roborock schedule write failed.");
   }
 
   private updateService(enabled: boolean): void {

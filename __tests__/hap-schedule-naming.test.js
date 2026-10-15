@@ -518,15 +518,26 @@ describe("HAP schedule names and stable group identity", () => {
         schedule("timer-2", false),
       ]);
 
+      // A failed write throws back to HAP (3.39.0): resolving left HAP to
+      // store the refused state over the restore.
       const first = switchService(accessory, "timer-1")
         .getCharacteristic(Characteristic.On)
-        .setHandler(true);
+        .setHandler(true)
+        .then(
+          () => "resolved",
+          (error) => error
+        );
       const second = switchService(accessory, "timer-2")
         .getCharacteristic(Characteristic.On)
-        .setHandler(true);
+        .setHandler(true)
+        .then(
+          () => "resolved",
+          (error) => error
+        );
 
       await jest.advanceTimersByTimeAsync(500);
-      await Promise.all([first, second]);
+      expect(await first).toBeInstanceOf(Error);
+      expect(await second).toBeInstanceOf(Error);
 
       expect(command).toHaveBeenCalledTimes(1);
       expect(platform.roborockAPI.getServerTimers).not.toHaveBeenCalled();
@@ -638,13 +649,22 @@ describe("HAP schedule names and stable group identity", () => {
 
       const first = switchService(accessory, "timer-1")
         .getCharacteristic(Characteristic.On)
-        .setHandler(true);
+        .setHandler(true)
+        .then(
+          () => "resolved",
+          (error) => error
+        );
       const second = switchService(accessory, "timer-2")
         .getCharacteristic(Characteristic.On)
-        .setHandler(true);
+        .setHandler(true)
+        .then(
+          () => "resolved",
+          (error) => error
+        );
 
       await jest.advanceTimersByTimeAsync(4000);
-      await Promise.all([first, second]);
+      expect(await first).toBeInstanceOf(Error);
+      expect(await second).toBe("resolved");
 
       expect(command).toHaveBeenCalledTimes(2);
       expect(platform.roborockAPI.getServerTimers).toHaveBeenCalledTimes(1);
