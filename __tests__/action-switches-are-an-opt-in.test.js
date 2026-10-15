@@ -112,6 +112,7 @@ function createPlatform({
     unregisterPlatformAccessories: jest.fn((_p, _n, list) => {
       platform.unregistered.push(...list.map((entry) => entry.displayName));
     }),
+    updatePlatformAccessories: jest.fn(),
   };
 
   return platform;

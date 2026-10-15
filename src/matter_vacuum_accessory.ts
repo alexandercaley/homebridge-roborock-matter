@@ -4503,7 +4503,7 @@ export default class RoborockMatterVacuumAccessory {
       // which tests its last published room list: when that differs from the
       // plugin's, matter.js would store a selection the plugin refused.
       this.platform.log.warn(
-        `Matter service area ${unsupportedArea} is not on the Roborock room map of ${this.getVacuumName()}, so the selection is refused and the controller keeps its previous one.`
+        `Matter service area ${unsupportedArea} is not on the Roborock room map of ${this.getVacuumName()}, so the selection is refused and the controller keeps its previous one. Homebridge logs the refusal as a handler error right after this line; that is expected.`
       );
       throw this.createMatterStatusError(
         "ConstraintError",
@@ -4518,7 +4518,7 @@ export default class RoborockMatterVacuumAccessory {
     );
     if (selectedMapIds.length > 1) {
       this.platform.log.warn(
-        `Ignoring Matter service area selection spanning ${selectedMapIds.length} Roborock maps for ${this.getVacuumName()} (maps ${selectedMapIds.join(", ")}; areas ${selectedAreas.join(", ")}); select areas from one map at a time. The selection is refused, not cleared, so the controller will keep showing the previous selection.`
+        `Ignoring Matter service area selection spanning ${selectedMapIds.length} Roborock maps for ${this.getVacuumName()} (maps ${selectedMapIds.join(", ")}; areas ${selectedAreas.join(", ")}); select areas from one map at a time. The selection is refused, not cleared, so the controller will keep showing the previous selection. Homebridge logs the refusal as a handler error right after this line; that is expected.`
       );
       throw this.createMatterStatusError(
         "ConstraintError",

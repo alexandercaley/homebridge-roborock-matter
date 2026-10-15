@@ -38,6 +38,24 @@ describe("hapName", () => {
     expect(hapName(name, "x", "Docked")).toBe(`${name} Docked`);
   });
 
+  // HAP judges the whole name: these all passed in 3.38.0 and must not change.
+  test.each([
+    ["Staubsauger (OG)", "Docked"],
+    ["Roborock (Küche)", "Schedules"],
+    ["Robo Jr.", "Docked"],
+    ["Kids'", "Docked"],
+    ["R", "Docked"],
+  ])("%j + %j is valid as a whole and is left alone", (base, suffix) => {
+    expect(`${base} ${suffix}`).toMatch(CHECK_NAME);
+    expect(hapName(base, "Roborock Vacuum", suffix)).toBe(`${base} ${suffix}`);
+  });
+
+  test("in front of a suffix a cleaned name keeps its closing bracket", () => {
+    expect(hapName("Q5 Max+ (OG)", "Roborock Vacuum", "Docked")).toBe(
+      "Q5 Max Plus (OG) Docked"
+    );
+  });
+
   test("a long robot name is cut, never the suffix, and fits Name's 64", () => {
     const name = hapName(
       "Robot " + "x".repeat(60),
@@ -139,6 +157,7 @@ test("a cached 'Q5 Max+ Pause' switch is renamed in place, not replaced", () => 
       hap: { uuid: { generate: (seed) => `uuid:${seed}` } },
       registerPlatformAccessories: jest.fn(),
       unregisterPlatformAccessories: jest.fn(),
+      updatePlatformAccessories: jest.fn(),
     },
   });
 
@@ -147,6 +166,8 @@ test("a cached 'Q5 Max+ Pause' switch is renamed in place, not replaced", () => 
   expect(cached.UUID).toBe(uuid);
   expect(platform.api.registerPlatformAccessories).not.toHaveBeenCalled();
   expect(platform.api.unregisterPlatformAccessories).not.toHaveBeenCalled();
+  // Saved at once, so an unclean stop cannot restore the old name.
+  expect(platform.api.updatePlatformAccessories).toHaveBeenCalledWith([cached]);
   for (const name of [
     cached.displayName,
     cached.getService("Information").getCharacteristic("Name").value,

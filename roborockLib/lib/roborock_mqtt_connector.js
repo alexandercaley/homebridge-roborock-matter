@@ -266,6 +266,12 @@ class roborock_mqtt_connector {
       username: mqttUser,
       password: mqttPassword,
       keepalive: 30,
+      // mqtt.js queues a QoS 0 publish made while it is disconnected and
+      // sends the whole queue on the next connect — and that queue survives
+      // the plugin's own session restart. A Start or a Dock the plugin had
+      // already reported as failed would reach the robot minutes later.
+      // python-roborock refuses to publish while disconnected; so does this.
+      queueQoSZero: false,
     });
   }
 
@@ -850,11 +856,11 @@ class roborock_mqtt_connector {
    * QoS 0, as python-roborock publishes every V1 and B01 request
    * (`MqttQos.AT_MOST_ONCE`; only A01 appliances need QoS 1, and this plugin
    * drives no A01 device). QoS 1 was inherited from the ioBroker adapter and
-   * has a cost on a flaky link: mqtt.js keeps every un-acknowledged QoS 1
-   * publish and sends it AGAIN after a reconnect, so a Start or a Dock the
-   * plugin had long given up on (and told Apple Home about) could reach the
-   * robot minutes later. Every request here has its own timeout and its own
-   * answer; a lost publish is reported as a timeout, not replayed.
+   * had a cost on a flaky link: mqtt.js keeps every un-acknowledged QoS 1
+   * publish and sends it AGAIN after a reconnect. With QoS 0 and
+   * `queueQoSZero: false` (see initUser) a publish made while the link is
+   * down is dropped, and the request it belongs to times out like any other
+   * unanswered request instead of being replayed later.
    */
   sendMessage(duid, roborockMessage) {
     client.publish(`rr/m/i/${rriot.u}/${mqttUser}/${duid}`, roborockMessage, {

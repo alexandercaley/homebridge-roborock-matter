@@ -82,3 +82,39 @@ test("every request is published at QoS 0, as python-roborock publishes it", asy
   expect(client.publish.mock.calls[0][2]).toEqual({ qos: 0 });
   connector.disconnect();
 });
+
+// mqtt.js queues a QoS 0 publish made while disconnected and sends the queue
+// on the next connect, unless queueQoSZero is off. Checked on the real client
+// with the options the plugin passes.
+test("a publish made while the link is down is dropped, not queued for later", async () => {
+  mqtt.connect.mockClear();
+  mqtt.connect.mockReturnValue({
+    on: jest.fn(),
+    subscribe: jest.fn(),
+    end: jest.fn(),
+    removeAllListeners: jest.fn(),
+  });
+  const connector = new roborock_mqtt_connector({
+    log: { debug() {}, info() {}, warn() {}, error() {} },
+  });
+  await connector.initUser({
+    rriot: { k: "k", u: "u", s: "s", r: { m: "mqtt://broker.invalid" } },
+  });
+  const options = mqtt.connect.mock.calls[0][1];
+  expect(options.queueQoSZero).toBe(false);
+
+  const realMqtt = jest.requireActual("mqtt");
+  const real = realMqtt.connect("mqtt://127.0.0.1:1", {
+    ...options,
+    reconnectPeriod: 0,
+    connectTimeout: 50,
+  });
+  real.on("error", () => {});
+  try {
+    real.publish("rr/m/i/u/x/duid", Buffer.from("Start"), { qos: 0 });
+    expect(real.queue).toHaveLength(0);
+  } finally {
+    real.end(true);
+    connector.disconnect();
+  }
+});

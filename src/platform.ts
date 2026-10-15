@@ -1520,6 +1520,7 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
       this.accessories.push(accessory);
     }
 
+    const renamed = !isNew && accessory.displayName !== name;
     accessory.displayName = name;
     // Merge rather than replace: a cached sensor carries the last value it
     // reported, and dropping that would make the sensor move on the first poll
@@ -1541,6 +1542,10 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
         PLATFORM_NAME,
         [accessory]
       );
+    } else if (renamed) {
+      // Saved now rather than at shutdown, so an unclean stop cannot bring
+      // the old name (and HAP's warning about it) back from the cache.
+      this.api.updatePlatformAccessories([accessory]);
     }
   }
 
@@ -1714,6 +1719,7 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
       this.accessories.push(accessory);
     }
 
+    const renamed = !isNew && accessory.displayName !== name;
     accessory.displayName = name;
     accessory.context = context;
 
@@ -1734,6 +1740,8 @@ export default class RoborockPlatform implements DynamicPlatformPlugin {
         PLATFORM_NAME,
         [accessory]
       );
+    } else if (renamed) {
+      this.api.updatePlatformAccessories([accessory]);
     }
   }
 

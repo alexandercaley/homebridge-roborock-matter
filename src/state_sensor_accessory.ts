@@ -232,6 +232,7 @@ export default class RoborockStateSensorAccessory {
       service.displayName = name;
       service.updateCharacteristic(this.platform.Characteristic.Name, name);
     }
+    this.platform.api.updatePlatformAccessories([this.accessory]);
   }
 
   /**

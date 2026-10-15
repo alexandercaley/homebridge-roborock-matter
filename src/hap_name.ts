@@ -13,8 +13,8 @@ export const HAP_NAME_MAX_LENGTH = 64;
 /**
  * A HomeKit-safe name: `base`, cleaned, then ` suffix`.
  *
- * A name that is already valid comes back unchanged, so no existing accessory
- * is renamed. Otherwise "+" reads as " Plus " ("Q5 Max+" -> "Q5 Max Plus"),
+ * A name HAP already accepts comes back unchanged, so no valid accessory is
+ * renamed. Otherwise "+" reads as " Plus " ("Q5 Max+" -> "Q5 Max Plus"),
  * any other unsupported character becomes a space, whitespace collapses, the
  * base is cut so the suffix always fits in 64, and both ends are trimmed to a
  * letter, number or combining mark. Combining marks are kept: dropping them
@@ -26,7 +26,9 @@ export function hapName(base: unknown, fallback: string, suffix = ""): string {
   const budget = HAP_NAME_MAX_LENGTH - tail.length;
   const text = typeof base === "string" ? base.normalize("NFC") : "";
 
-  if (text.length <= budget && HAP_NAME_PATTERN.test(text)) {
+  // HAP judges the whole name, so a base ending in ")" or "'" is fine in
+  // front of a suffix. A name HAP already accepts is never touched.
+  if (text.length <= budget && HAP_NAME_PATTERN.test(text + tail)) {
     return text + tail;
   }
 
@@ -42,9 +44,11 @@ export function hapName(base: unknown, fallback: string, suffix = ""): string {
     cut += character;
   }
 
-  const cleaned = cut.replace(
-    /^[^\p{L}\p{N}]+|[^\p{L}\p{Mn}\p{Mc}\p{N}]+$/gu,
-    ""
-  );
+  // The name must start with a letter or number, and end with one. A suffix
+  // supplies the end, so in front of one only trailing spaces go: "Q5 Max+
+  // (OG)" keeps its ")".
+  const cleaned = tail
+    ? cut.replace(/^[^\p{L}\p{N}]+/u, "").replace(/\s+$/u, "")
+    : cut.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{Mn}\p{Mc}\p{N}]+$/gu, "");
   return ([...cleaned].length >= 2 ? cleaned : fallback) + tail;
 }
