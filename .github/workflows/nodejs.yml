@@ -65,7 +65,9 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
       - run: npm ci
-      - run: npm test -- --coverage
+      # In one process, as the release workflow runs it: a timer a test
+      # leaves behind then fails CI here instead of the release run.
+      - run: npm test -- --coverage --runInBand
         env:
           CI: true
       - name: Upload coverage to Codecov
