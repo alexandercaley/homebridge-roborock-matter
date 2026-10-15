@@ -166,7 +166,7 @@ describe("the B01 cadence the log announces is the cadence the code uses", () =>
     // to work out why a run took so long to show up. The message must not
     // contain hand-written numbers at all.
     const startupLine =
-      /Starting the dedicated B01\/Q7 status loop \(([^)]*)\)/.exec(source)[1];
+      /Starting the dedicated B01\/Q7 status loop \((.*)\)\.`/.exec(source)[1];
 
     // Strip the interpolations; whatever literal text is left must not quote
     // a cadence of its own.

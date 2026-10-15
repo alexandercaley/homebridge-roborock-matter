@@ -5712,8 +5712,10 @@ class Roborock {
       return;
     }
 
+    // The gaps are minimums between reads, so on a fixed tick a read lands on
+    // the first tick past each gap.
     this.log.info(
-      `Starting the dedicated B01/Q7 status loop (${B01_STATUS_TICK_MS / 1000}s tick; ~${B01_STATUS_ACTIVE_GAP_MS / 1000}s effective cadence while active, ~${B01_STATUS_IDLE_GAP_MS / 1000}s at rest).`
+      `Starting the dedicated B01/Q7 status loop (a status read every ${(Math.ceil(B01_STATUS_ACTIVE_GAP_MS / B01_STATUS_TICK_MS) * B01_STATUS_TICK_MS) / 1000}s while a robot works, every ${(Math.ceil(B01_STATUS_IDLE_GAP_MS / B01_STATUS_TICK_MS) * B01_STATUS_TICK_MS) / 1000}s at rest).`
     );
     const pollAllB01 = (options) => {
       for (const duid of this.initializedVacuumDuids) {
