@@ -2268,7 +2268,10 @@ class Roborock {
       }
       this.bInited = false;
     } catch (e) {
-      this.catchError(e.stack);
+      // Not through catchError, which stays quiet once `stopped` is set.
+      this.log.error(
+        `Stopping the Roborock connection failed: ${/** @type {any} */ (e)?.stack || e}`
+      );
     }
   }
 
@@ -4436,6 +4439,14 @@ class Roborock {
   async catchError(error, attribute, duid, model) {
     if (error) {
       const errorText = error.toString();
+
+      // stopService rejects every request still waiting, so a poll that was
+      // on the wire when Homebridge stopped used to end the log with
+      // "Failed to execute … Homebridge is shutting down" at error level.
+      if (this.stopped) {
+        this.log.debug(errorText);
+        return;
+      }
 
       // Methods without a B01/Q7 equivalent are an expected condition on
       // those robots, not a failure; keep the log calm.

@@ -215,3 +215,20 @@ describe("a B01 map request in flight at shutdown", () => {
     }
   });
 });
+
+describe("a request that shutdown cut short", () => {
+  test("is not reported as a failure at error level", async () => {
+    const api = makeApi();
+    await api.stopService();
+
+    await api.catchError(
+      new Error("Homebridge is shutting down."),
+      "get_water_box_custom_mode",
+      "d1",
+      "roborock.vacuum.a70"
+    );
+
+    expect(api.log.error).not.toHaveBeenCalled();
+    expect(api.log.warn).not.toHaveBeenCalled();
+  });
+});
