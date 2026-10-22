@@ -36,10 +36,19 @@ const WATER_BOX_MILD = 201;
 const WATER_BOX_HIGH = 203;
 const WATER_BOX_SMART_PLAN = 209;
 
-/** Roborock state 8 is Charging (docked). */
+/** Roborock states: 8 is Charging (docked), 18 is Room Clean (running). */
 const ROBOROCK_STATE_CHARGING = 8;
+const ROBOROCK_STATE_ROOM_CLEAN = 18;
 
-function createHarness(initialStatus) {
+const CLEAN_MODE_SMART_PLAN = 8;
+const RVC_CLEAN_MODE_TAG_AUTO = 0;
+const RVC_CLEAN_MODE_TAG_VACUUM = 16385;
+const RVC_CLEAN_MODE_TAG_MOP = 16386;
+
+function createHarness(
+  initialStatus,
+  { smartPlanCleanMode = false, canControlWater = true } = {}
+) {
   const status = {
     state: ROBOROCK_STATE_CHARGING,
     battery: 100,
@@ -51,6 +60,7 @@ function createHarness(initialStatus) {
       enableMatter: true,
       enableMatterCleanMode: true,
       enableFanPowerCleanModes: false,
+      enableSmartPlanCleanMode: smartPlanCleanMode,
     },
     log: {
       debug: jest.fn(),
@@ -76,7 +86,7 @@ function createHarness(initialStatus) {
         canMop: true,
         canControlFanPower: true,
         canMaxPlusFanPower: false,
-        canControlWater: true,
+        canControlWater,
       }),
       getStatus: jest.fn().mockResolvedValue(undefined),
       applyMatterCleanModeSettings: jest.fn(async (duid, settings) => {
@@ -101,6 +111,8 @@ function createHarness(initialStatus) {
     instance,
     applied,
     handlers: accessory.handlers,
+    supportedModes: () => instance.getSupportedCleanModes(),
+    cleanMode: () => instance.getCurrentCleanMode(),
     set: (patch) => Object.assign(status, patch),
   };
 }
@@ -174,6 +186,73 @@ describe("a robot in SmartPlan gets the mode Apple Home asked for", () => {
     const settings = await selectAndStart(harness, CLEAN_MODE_VACUUM);
 
     expect(settings.fanPower).toBe(FAN_POWER_TURBO);
+    expect(settings.waterBoxMode).toBe(WATER_BOX_OFF);
+  });
+});
+
+describe("SmartPlan as a clean mode of its own (enableSmartPlanCleanMode)", () => {
+  test("it is off by default, and a SmartPlan run reads as Vacuum + Mop", () => {
+    const harness = createHarness({
+      ...SMART_PLAN,
+      state: ROBOROCK_STATE_ROOM_CLEAN,
+    });
+
+    expect(harness.supportedModes().map((m) => m.mode)).not.toContain(
+      CLEAN_MODE_SMART_PLAN
+    );
+    expect(harness.cleanMode()).toBe(CLEAN_MODE_VACUUM_AND_MOP);
+  });
+
+  test("enabled, it is announced as Vacuum + Mop + Auto", () => {
+    const harness = createHarness({}, { smartPlanCleanMode: true });
+    const smartPlan = harness
+      .supportedModes()
+      .find((m) => m.mode === CLEAN_MODE_SMART_PLAN);
+
+    expect(smartPlan.label).toBe("SmartPlan");
+    expect(smartPlan.modeTags.map((tag) => tag.value)).toEqual([
+      RVC_CLEAN_MODE_TAG_VACUUM,
+      RVC_CLEAN_MODE_TAG_MOP,
+      RVC_CLEAN_MODE_TAG_AUTO,
+    ]);
+  });
+
+  test("it is not announced for a robot without water control (Q7)", () => {
+    const harness = createHarness(
+      {},
+      { smartPlanCleanMode: true, canControlWater: false }
+    );
+
+    expect(harness.supportedModes().map((m) => m.mode)).not.toContain(
+      CLEAN_MODE_SMART_PLAN
+    );
+  });
+
+  test("starting in SmartPlan sends fan power 110 and no water level", async () => {
+    const harness = createHarness(
+      { fan_power: FAN_POWER_TURBO, water_box_mode: WATER_BOX_HIGH },
+      { smartPlanCleanMode: true }
+    );
+    const settings = await selectAndStart(harness, CLEAN_MODE_SMART_PLAN);
+
+    expect(settings.fanPower).toBe(FAN_POWER_SMART_PLAN);
+    expect(settings.waterBoxMode).toBeUndefined();
+  });
+
+  test("a SmartPlan run started in the Roborock app reads as SmartPlan", () => {
+    const harness = createHarness(
+      { ...SMART_PLAN, state: ROBOROCK_STATE_ROOM_CLEAN },
+      { smartPlanCleanMode: true }
+    );
+
+    expect(harness.cleanMode()).toBe(CLEAN_MODE_SMART_PLAN);
+  });
+
+  test("Vacuum from SmartPlan still leaves it, with the mode announced", async () => {
+    const harness = createHarness(SMART_PLAN, { smartPlanCleanMode: true });
+    const settings = await selectAndStart(harness, CLEAN_MODE_VACUUM);
+
+    expect(settings.fanPower).toBe(FAN_POWER_BALANCED);
     expect(settings.waterBoxMode).toBe(WATER_BOX_OFF);
   });
 });
