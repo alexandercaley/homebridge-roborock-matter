@@ -42,6 +42,7 @@ const ROBOROCK_STATE_ROOM_CLEAN = 18;
 
 const CLEAN_MODE_SMART_PLAN = 8;
 const RVC_CLEAN_MODE_TAG_AUTO = 0;
+const RVC_CLEAN_MODE_TAG_DAY = 9;
 const RVC_CLEAN_MODE_TAG_VACUUM = 16385;
 const RVC_CLEAN_MODE_TAG_MOP = 16386;
 
@@ -214,6 +215,31 @@ describe("SmartPlan as a clean mode of its own (enableSmartPlanCleanMode)", () =
       RVC_CLEAN_MODE_TAG_VACUUM,
       RVC_CLEAN_MODE_TAG_MOP,
       RVC_CLEAN_MODE_TAG_AUTO,
+    ]);
+  });
+
+  test("enabled, plain Vacuum + Mop is tagged Day so the two look different", () => {
+    const harness = createHarness({}, { smartPlanCleanMode: true });
+    const vacuumAndMop = harness
+      .supportedModes()
+      .find((m) => m.mode === CLEAN_MODE_VACUUM_AND_MOP);
+
+    expect(vacuumAndMop.modeTags.map((tag) => tag.value)).toEqual([
+      RVC_CLEAN_MODE_TAG_VACUUM,
+      RVC_CLEAN_MODE_TAG_MOP,
+      RVC_CLEAN_MODE_TAG_DAY,
+    ]);
+  });
+
+  test("disabled, plain Vacuum + Mop keeps exactly the tags it shipped with", () => {
+    const harness = createHarness({});
+    const vacuumAndMop = harness
+      .supportedModes()
+      .find((m) => m.mode === CLEAN_MODE_VACUUM_AND_MOP);
+
+    expect(vacuumAndMop.modeTags.map((tag) => tag.value)).toEqual([
+      RVC_CLEAN_MODE_TAG_VACUUM,
+      RVC_CLEAN_MODE_TAG_MOP,
     ]);
   });
 

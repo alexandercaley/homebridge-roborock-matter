@@ -250,6 +250,7 @@ const RVC_CLEAN_MODE_TAG_AUTO = 0;
 const RVC_CLEAN_MODE_TAG_QUICK = 1;
 const RVC_CLEAN_MODE_TAG_QUIET = 2;
 const RVC_CLEAN_MODE_TAG_MAX = 7;
+const RVC_CLEAN_MODE_TAG_DAY = 9;
 // RVC Clean Mode cluster tag: DeepClean — the closest semantic match for
 // Roborock's Max+ boost level.
 const RVC_CLEAN_MODE_TAG_DEEP_CLEAN = 16384;
@@ -3220,6 +3221,7 @@ export default class RoborockMatterVacuumAccessory {
     ];
 
     const capabilities = this.getMatterCleanModeCapabilities();
+    const announceSmartPlan = this.isSmartPlanCleanModeAvailable(capabilities);
     if (capabilities.canMop) {
       supportedModes.push(
         {
@@ -3240,17 +3242,17 @@ export default class RoborockMatterVacuumAccessory {
           modeTags: [
             { value: RVC_CLEAN_MODE_TAG_VACUUM },
             { value: RVC_CLEAN_MODE_TAG_MOP },
+            // Apple shows a mode with no level tag as "Automatic", the same
+            // name SmartPlan's Auto tag gets, so the two looked identical in
+            // the Vacuum & Mop menu. Only alongside SmartPlan, which needs a
+            // re-pair anyway, so nobody else's mode list changes.
+            ...(announceSmartPlan ? [{ value: RVC_CLEAN_MODE_TAG_DAY }] : []),
           ],
         }
       );
     }
 
-    if (
-      this.isSmartPlanCleanModeEnabled() &&
-      capabilities.canMop === true &&
-      capabilities.canControlFanPower === true &&
-      capabilities.canControlWater === true
-    ) {
+    if (announceSmartPlan) {
       // Apple renders the tags, not the label. Vacuum + Mop + Auto is what
       // SmartPlan does: both, with the robot choosing how.
       supportedModes.push({
@@ -3294,8 +3296,15 @@ export default class RoborockMatterVacuumAccessory {
     return this.platform.platformConfig.enableFanPowerCleanModes !== false;
   }
 
-  private isSmartPlanCleanModeEnabled(): boolean {
-    return this.platform.platformConfig.enableSmartPlanCleanMode === true;
+  private isSmartPlanCleanModeAvailable(
+    capabilities: MatterCleanModeCapabilities
+  ): boolean {
+    return (
+      this.platform.platformConfig.enableSmartPlanCleanMode === true &&
+      capabilities.canMop === true &&
+      capabilities.canControlFanPower === true &&
+      capabilities.canControlWater === true
+    );
   }
 
   private getFanPowerCleanMode(
